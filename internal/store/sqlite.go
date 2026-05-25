@@ -1,0 +1,384 @@
+package store
+
+import (
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	_ "modernc.org/sqlite"
+
+	"github.com/overseer/overseer/internal/model"
+	"github.com/overseer/overseer/internal/store/migrations"
+)
+
+// SQLiteStore implements the Store interface using SQLite.
+type SQLiteStore struct {
+	db *sql.DB
+}
+
+// NewSQLiteStore creates a new SQLiteStore with the given DSN.
+// Use ":memory:" for in-memory databases or a file path for persistent storage.
+func NewSQLiteStore(dsn string) (*SQLiteStore, error) {
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite: %w", err)
+	}
+
+	// Enable WAL mode and foreign keys for better performance and integrity.
+	pragmas := []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA foreign_keys=ON",
+		"PRAGMA busy_timeout=5000",
+	}
+	for _, p := range pragmas {
+		if _, err := db.Exec(p); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("exec pragma %q: %w", p, err)
+		}
+	}
+
+	return &SQLiteStore{db: db}, nil
+}
+
+// migrationStatements aggregates all migration SQL from the migrations package.
+var migrationStatements = migrations.InitialMigration
+
+// Migrate creates or upgrades the database schema.
+func (s *SQLiteStore) Migrate() error {
+	for _, stmt := range migrationStatements {
+		if _, err := s.db.Exec(stmt); err != nil {
+			return fmt.Errorf("migrate: %w", err)
+		}
+	}
+	return nil
+}
+
+// Close closes the underlying database connection.
+func (s *SQLiteStore) Close() error {
+	return s.db.Close()
+}
+
+// --- Message operations ---
+
+func (s *SQLiteStore) SaveMessage(msg *model.Message) error {
+	var extraJSON *string
+	if len(msg.Extra) > 0 {
+		b, err := json.Marshal(msg.Extra)
+		if err != nil {
+			return fmt.Errorf("marshal extra: %w", err)
+		}
+		str := string(b)
+		extraJSON = &str
+	}
+
+	_, err := s.db.Exec(
+		`INSERT INTO messages (id, source, channel, title, body, extra, status, fail_reason, retry_count, received_at, pushed_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		msg.ID, msg.Source, msg.Channel, msg.Title, msg.Body, extraJSON,
+		string(msg.Status), msg.FailReason, msg.RetryCount, msg.ReceivedAt, msg.PushedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("save message: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) UpdateMessageStatus(id string, status model.PushStatus, failReason string) error {
+	var err error
+	if status == model.StatusSuccess {
+		now := time.Now()
+		_, err = s.db.Exec(
+			`UPDATE messages SET status = ?, fail_reason = ?, retry_count = retry_count + 1, pushed_at = ? WHERE id = ?`,
+			string(status), failReason, now, id,
+		)
+	} else {
+		_, err = s.db.Exec(
+			`UPDATE messages SET status = ?, fail_reason = ?, retry_count = retry_count + 1 WHERE id = ?`,
+			string(status), failReason, id,
+		)
+	}
+	if err != nil {
+		return fmt.Errorf("update message status: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) QueryMessages(filter MessageFilter) (*model.PagedResult[model.Message], error) {
+	var conditions []string
+	var args []interface{}
+
+	if filter.Channel != "" {
+		conditions = append(conditions, "channel = ?")
+		args = append(args, filter.Channel)
+	}
+	if filter.Status != "" {
+		conditions = append(conditions, "status = ?")
+		args = append(args, string(filter.Status))
+	}
+	if !filter.From.IsZero() {
+		conditions = append(conditions, "received_at >= ?")
+		args = append(args, filter.From)
+	}
+	if !filter.To.IsZero() {
+		conditions = append(conditions, "received_at <= ?")
+		args = append(args, filter.To)
+	}
+
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = "WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	// Count total matching records.
+	countQuery := "SELECT COUNT(*) FROM messages " + whereClause
+	var total int
+	if err := s.db.QueryRow(countQuery, args...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("count messages: %w", err)
+	}
+
+	// Apply pagination defaults.
+	page := filter.Page
+	if page < 1 {
+		page = 1
+	}
+	pageSize := filter.PageSize
+	if pageSize < 1 {
+		pageSize = 20
+	}
+
+	offset := (page - 1) * pageSize
+
+	dataQuery := "SELECT id, source, channel, title, body, extra, status, fail_reason, retry_count, received_at, pushed_at FROM messages " +
+		whereClause + " ORDER BY received_at DESC LIMIT ? OFFSET ?"
+	dataArgs := append(args, pageSize, offset)
+
+	rows, err := s.db.Query(dataQuery, dataArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("query messages: %w", err)
+	}
+	defer rows.Close()
+
+	var messages []model.Message
+	for rows.Next() {
+		var msg model.Message
+		var extraStr sql.NullString
+		var statusStr string
+		var pushedAt sql.NullTime
+
+		if err := rows.Scan(
+			&msg.ID, &msg.Source, &msg.Channel, &msg.Title, &msg.Body,
+			&extraStr, &statusStr, &msg.FailReason, &msg.RetryCount,
+			&msg.ReceivedAt, &pushedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan message: %w", err)
+		}
+
+		msg.Status = model.PushStatus(statusStr)
+		if pushedAt.Valid {
+			msg.PushedAt = &pushedAt.Time
+		}
+		if extraStr.Valid && extraStr.String != "" {
+			if err := json.Unmarshal([]byte(extraStr.String), &msg.Extra); err != nil {
+				return nil, fmt.Errorf("unmarshal extra: %w", err)
+			}
+		}
+
+		messages = append(messages, msg)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate messages: %w", err)
+	}
+
+	return &model.PagedResult[model.Message]{
+		Total:    total,
+		Page:     page,
+		PageSize: pageSize,
+		Data:     messages,
+	}, nil
+}
+
+func (s *SQLiteStore) GetChannelStats(from, to time.Time) ([]model.ChannelStats, error) {
+	query := `SELECT
+		channel,
+		COUNT(*) as total,
+		SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as success_count,
+		SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_count
+	FROM messages
+	WHERE received_at >= ? AND received_at <= ?
+	GROUP BY channel`
+
+	rows, err := s.db.Query(query, from, to)
+	if err != nil {
+		return nil, fmt.Errorf("get channel stats: %w", err)
+	}
+	defer rows.Close()
+
+	var stats []model.ChannelStats
+	for rows.Next() {
+		var cs model.ChannelStats
+		if err := rows.Scan(&cs.Channel, &cs.Total, &cs.SuccessCount, &cs.FailedCount); err != nil {
+			return nil, fmt.Errorf("scan channel stats: %w", err)
+		}
+		if cs.Total > 0 {
+			cs.SuccessPercent = float64(cs.SuccessCount) / float64(cs.Total) * 100
+			cs.FailedPercent = float64(cs.FailedCount) / float64(cs.Total) * 100
+		}
+		stats = append(stats, cs)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate channel stats: %w", err)
+	}
+
+	return stats, nil
+}
+
+// --- Reminder operations ---
+
+func (s *SQLiteStore) CreateReminder(r *model.Reminder) error {
+	_, err := s.db.Exec(`
+		INSERT INTO reminders (id, title, body, channel, trigger_at, repeat_type, repeat_rule, status, next_trigger, last_triggered, fail_reason, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.ID, r.Title, r.Body, r.Channel, r.TriggerAt, string(r.RepeatType), r.RepeatRule,
+		r.Status, r.NextTrigger, r.LastTriggered, r.FailReason, r.CreatedAt, r.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("create reminder: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) UpdateReminder(r *model.Reminder) error {
+	result, err := s.db.Exec(`
+		UPDATE reminders
+		SET title = ?, body = ?, channel = ?, trigger_at = ?, repeat_type = ?, repeat_rule = ?, next_trigger = ?, updated_at = ?
+		WHERE id = ?`,
+		r.Title, r.Body, r.Channel, r.TriggerAt, string(r.RepeatType), r.RepeatRule, r.NextTrigger, time.Now(),
+		r.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("update reminder: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update reminder rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("update reminder: not found")
+	}
+	return nil
+}
+
+func (s *SQLiteStore) CancelReminder(id string) error {
+	result, err := s.db.Exec(`
+		UPDATE reminders SET status = 'cancelled', updated_at = ? WHERE id = ?`,
+		time.Now(), id,
+	)
+	if err != nil {
+		return fmt.Errorf("cancel reminder: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("cancel reminder rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("cancel reminder: not found")
+	}
+	return nil
+}
+
+func (s *SQLiteStore) ListReminders(filter ReminderFilter) ([]model.Reminder, error) {
+	query := `SELECT id, title, body, channel, trigger_at, repeat_type, repeat_rule, status, next_trigger, last_triggered, fail_reason, created_at, updated_at FROM reminders`
+	var args []interface{}
+
+	if filter.Status != "" {
+		query += ` WHERE status = ?`
+		args = append(args, filter.Status)
+	}
+	query += ` ORDER BY created_at DESC`
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list reminders: %w", err)
+	}
+	defer rows.Close()
+
+	return scanReminders(rows)
+}
+
+func (s *SQLiteStore) GetActiveReminders() ([]model.Reminder, error) {
+	rows, err := s.db.Query(`
+		SELECT id, title, body, channel, trigger_at, repeat_type, repeat_rule, status, next_trigger, last_triggered, fail_reason, created_at, updated_at
+		FROM reminders WHERE status = 'active'
+		ORDER BY next_trigger ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("get active reminders: %w", err)
+	}
+	defer rows.Close()
+
+	return scanReminders(rows)
+}
+
+func (s *SQLiteStore) UpdateNextTrigger(id string, next time.Time) error {
+	result, err := s.db.Exec(`
+		UPDATE reminders SET next_trigger = ?, updated_at = ? WHERE id = ?`,
+		next, time.Now(), id,
+	)
+	if err != nil {
+		return fmt.Errorf("update next trigger: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update next trigger rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("update next trigger: not found")
+	}
+	return nil
+}
+
+// scanReminders scans rows into a slice of Reminder.
+func scanReminders(rows *sql.Rows) ([]model.Reminder, error) {
+	var reminders []model.Reminder
+	for rows.Next() {
+		var r model.Reminder
+		var repeatType string
+		var body, repeatRule, failReason sql.NullString
+		var nextTrigger, lastTriggered sql.NullTime
+
+		err := rows.Scan(
+			&r.ID, &r.Title, &body, &r.Channel, &r.TriggerAt,
+			&repeatType, &repeatRule, &r.Status, &nextTrigger,
+			&lastTriggered, &failReason, &r.CreatedAt, &r.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan reminder: %w", err)
+		}
+
+		r.RepeatType = model.RepeatType(repeatType)
+		if body.Valid {
+			r.Body = body.String
+		}
+		if repeatRule.Valid {
+			r.RepeatRule = repeatRule.String
+		}
+		if failReason.Valid {
+			r.FailReason = failReason.String
+		}
+		if nextTrigger.Valid {
+			r.NextTrigger = &nextTrigger.Time
+		}
+		if lastTriggered.Valid {
+			r.LastTriggered = &lastTriggered.Time
+		}
+
+		reminders = append(reminders, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("scan reminders: %w", err)
+	}
+	return reminders, nil
+}
+
+

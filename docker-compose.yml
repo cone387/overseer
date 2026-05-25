@@ -1,0 +1,16 @@
+services:
+  overseer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.yaml:/etc/overseer/config.yaml:ro
+      - overseer-data:/data
+    environment:
+      - OVERSEER_CONFIG_PATH=/etc/overseer/config.yaml
+    restart: unless-stopped
+
+volumes:
+  overseer-data:

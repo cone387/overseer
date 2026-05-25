@@ -1,0 +1,43 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+.kiro/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+overseer.exe
+
+# Frontend node_modules (will be installed fresh in build)
+web/node_modules/
+
+# Frontend dist (will be built fresh in build)
+web/dist/
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Documentation
+LICENSE
+README.md
+
+# Example/test configs
+config.example.yaml
+
+# Null file
+$null
