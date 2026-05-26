@@ -48,8 +48,8 @@ function Dashboard() {
   }
 
   const totalPushes = stats.reduce((sum, s) => sum + s.total, 0)
-  const totalSuccess = stats.reduce((sum, s) => sum + s.success, 0)
-  const totalFailed = stats.reduce((sum, s) => sum + s.failed, 0)
+  const totalSuccess = stats.reduce((sum, s) => sum + s.success_count, 0)
+  const totalFailed = stats.reduce((sum, s) => sum + s.failed_count, 0)
   const successRate = totalPushes > 0 ? ((totalSuccess / totalPushes) * 100).toFixed(1) : '--'
 
   return (
@@ -117,9 +117,9 @@ function Dashboard() {
                   <tr key={s.channel}>
                     <td><span className="channel-badge">{s.channel}</span></td>
                     <td>{s.total}</td>
-                    <td>{s.success}</td>
-                    <td>{s.failed}</td>
-                    <td>{s.percentage.toFixed(1)}%</td>
+                    <td>{s.success_count}</td>
+                    <td>{s.failed_count}</td>
+                    <td>{(s.success_percent || 0).toFixed(1)}%</td>
                   </tr>
                 ))}
               </tbody>

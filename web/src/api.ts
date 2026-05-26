@@ -178,9 +178,10 @@ export async function deleteAPIKey(id: string): Promise<void> {
 export interface ChannelStat {
   channel: string
   total: number
-  success: number
-  failed: number
-  percentage: number
+  success_count: number
+  failed_count: number
+  success_percent: number
+  failed_percent: number
 }
 
 export function fetchStats(from: string, to: string): Promise<ApiResponse<ChannelStat[]>> {
