@@ -11,6 +11,7 @@ const navItems = [
 ]
 
 const bottomNavItems = [
+  { path: '/api-keys', label: 'API Key', icon: '🔑' },
   { path: '/settings', label: '设置', icon: '⚙️' },
 ]
 

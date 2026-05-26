@@ -7,6 +7,7 @@ import Reminders from './pages/Reminders'
 import Push from './pages/Push'
 import Devices from './pages/Devices'
 import Channels from './pages/Channels'
+import ApiKeys from './pages/ApiKeys'
 import Settings from './pages/Settings'
 
 function App() {
@@ -20,6 +21,7 @@ function App() {
           <Route path="push" element={<Push />} />
           <Route path="devices" element={<Devices />} />
           <Route path="channels" element={<Channels />} />
+          <Route path="api-keys" element={<ApiKeys />} />
           <Route path="settings" element={<Settings />} />
         </Route>
       </Routes>

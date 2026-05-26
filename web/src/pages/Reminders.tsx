@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { fetchReminders, createReminder, updateReminder, cancelReminder, fetchChannels, Reminder, CreateReminderRequest, Channel } from '../api'
+import { Link } from 'react-router-dom'
+import { fetchReminders, createReminder, updateReminder, cancelReminder, fetchChannels, fetchDevices, Reminder, CreateReminderRequest, Channel, Device } from '../api'
 import './Pages.css'
 
 type TabStatus = '' | 'active' | 'completed' | 'cancelled'
@@ -7,6 +8,7 @@ type TabStatus = '' | 'active' | 'completed' | 'cancelled'
 function Reminders() {
   const [reminders, setReminders] = useState<Reminder[]>([])
   const [channels, setChannels] = useState<Channel[]>([])
+  const [devices, setDevices] = useState<Device[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [activeTab, setActiveTab] = useState<TabStatus>('active')
@@ -20,11 +22,15 @@ function Reminders() {
   const [formChannel, setFormChannel] = useState('')
   const [formRepeat, setFormRepeat] = useState('once')
   const [formRepeatRule, setFormRepeatRule] = useState('')
+  const [formDeviceKeys, setFormDeviceKeys] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState('')
 
   useEffect(() => { loadReminders() }, [activeTab])
-  useEffect(() => { loadChannels() }, [])
+  useEffect(() => {
+    loadChannels()
+    loadDevices()
+  }, [])
 
   async function loadReminders() {
     setLoading(true)
@@ -46,6 +52,13 @@ function Reminders() {
     } catch { /* ignore */ }
   }
 
+  async function loadDevices() {
+    try {
+      const res = await fetchDevices()
+      setDevices(res.data || [])
+    } catch { /* ignore */ }
+  }
+
   function startEdit(r: Reminder) {
     setEditingId(r.id)
     setFormTitle(r.title)
@@ -54,6 +67,7 @@ function Reminders() {
     setFormChannel(r.channel)
     setFormRepeat(r.repeat_type)
     setFormRepeatRule(r.repeat_rule || '')
+    setFormDeviceKeys([])
     setShowForm(true)
     setFormError('')
   }
@@ -71,6 +85,7 @@ function Reminders() {
       if (formChannel) data.channel = formChannel
       if (formRepeat !== 'once') data.repeat = formRepeat
       if (formRepeatRule) data.repeat_rule = formRepeatRule
+      // TODO: send device_keys when backend supports it
 
       if (editingId) {
         await updateReminder(editingId, data)
@@ -99,10 +114,8 @@ function Reminders() {
 
   async function handleReactivate(r: Reminder) {
     try {
-      // Reactivate by updating with a new trigger time (keep original or set to future)
       const triggerAt = new Date(r.trigger_at)
       const now = new Date()
-      // If trigger is in the past, set to 1 hour from now
       const newTrigger = triggerAt > now ? triggerAt.toISOString() : new Date(now.getTime() + 3600000).toISOString()
       await updateReminder(r.id, {
         title: r.title,
@@ -125,6 +138,7 @@ function Reminders() {
     setFormChannel('')
     setFormRepeat('once')
     setFormRepeatRule('')
+    setFormDeviceKeys([])
     setFormError('')
     setEditingId(null)
   }
@@ -195,6 +209,34 @@ function Reminders() {
                 </div>
               )}
             </div>
+
+            {/* Device selection */}
+            {devices.length > 0 && (
+              <div className="form-group">
+                <label className="form-label">目标设备</label>
+                <div className="device-checkbox-list">
+                  {devices.map((d) => (
+                    <label key={d.id} className="form-label--checkbox">
+                      <input
+                        type="checkbox"
+                        checked={formDeviceKeys.includes(d.device_key)}
+                        onChange={() => {
+                          setFormDeviceKeys((prev) =>
+                            prev.includes(d.device_key)
+                              ? prev.filter((k) => k !== d.device_key)
+                              : [...prev, d.device_key]
+                          )
+                        }}
+                      />
+                      <span>{d.name}</span>
+                      {d.is_default && <span className="device-badge">默认</span>}
+                    </label>
+                  ))}
+                </div>
+                <small className="form-hint">选择提醒推送的目标设备，不选择则推送到所有设备</small>
+              </div>
+            )}
+
             <div className="form-actions">
               <button type="submit" className="btn btn--primary" disabled={submitting}>
                 {submitting ? '提交中...' : editingId ? '保存修改' : '创建提醒'}
@@ -235,6 +277,9 @@ function Reminders() {
                 <span>触发: {formatTime(r.trigger_at)}</span>
                 <span>重复: {r.repeat_type === 'once' ? '一次性' : r.repeat_type === 'daily' ? '每天' : r.repeat_type === 'weekly' ? '每周' : r.repeat_type}</span>
                 {r.next_trigger && <span>下次: {formatTime(r.next_trigger)}</span>}
+                <Link to={`/messages?channel=${encodeURIComponent(r.channel)}`} className="reminder-push-count">
+                  已推送: 0 次
+                </Link>
               </div>
               <div className="reminder-actions">
                 {r.status === 'active' && (

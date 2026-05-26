@@ -470,6 +470,16 @@
   color: var(--color-text-secondary);
 }
 
+.reminder-push-count {
+  color: var(--color-primary, #3b82f6);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.reminder-push-count:hover {
+  text-decoration: underline;
+}
+
 .reminder-actions {
   margin-top: 12px;
   padding-top: 12px;

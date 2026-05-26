@@ -1,8 +1,29 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { fetchMessages, fetchChannels, Message, MessageFilter, Channel } from '../api'
 import './Pages.css'
 
+type TimeRange = '1h' | '24h' | '7d' | '30d' | 'custom'
+
+function toISO(localDatetime: string): string {
+  if (!localDatetime) return ''
+  return new Date(localDatetime).toISOString()
+}
+
+function getFromDate(range: TimeRange): string {
+  const d = new Date()
+  switch (range) {
+    case '1h': d.setHours(d.getHours() - 1); break
+    case '24h': d.setHours(d.getHours() - 24); break
+    case '7d': d.setDate(d.getDate() - 7); break
+    case '30d': d.setDate(d.getDate() - 30); break
+    default: return ''
+  }
+  return d.toISOString()
+}
+
 function Messages() {
+  const [searchParams] = useSearchParams()
   const [messages, setMessages] = useState<Message[]>([])
   const [channels, setChannels] = useState<Channel[]>([])
   const [total, setTotal] = useState(0)
@@ -11,21 +32,22 @@ function Messages() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  const [channelFilter, setChannelFilter] = useState('')
+  const [channelFilter, setChannelFilter] = useState(() => searchParams.get('channel') || '')
   const [statusFilter, setStatusFilter] = useState('')
-  const [fromDate, setFromDate] = useState(() => {
+  const [timeRange, setTimeRange] = useState<TimeRange>('7d')
+  const [customFrom, setCustomFrom] = useState(() => {
     const d = new Date()
     d.setDate(d.getDate() - 7)
     return d.toISOString().slice(0, 16)
   })
-  const [toDate, setToDate] = useState(() => {
+  const [customTo, setCustomTo] = useState(() => {
     return new Date().toISOString().slice(0, 16)
   })
 
   useEffect(() => { loadChannels() }, [])
   useEffect(() => {
     loadMessages()
-  }, [page, channelFilter, statusFilter, fromDate, toDate])
+  }, [page, channelFilter, statusFilter, timeRange, customFrom, customTo])
 
   async function loadChannels() {
     try {
@@ -41,9 +63,16 @@ function Messages() {
       const filter: MessageFilter = {
         page,
         page_size: pageSize,
-        from: new Date(fromDate).toISOString(),
-        to: new Date(toDate).toISOString(),
       }
+
+      if (timeRange === 'custom') {
+        if (customFrom) filter.from = toISO(customFrom)
+        if (customTo) filter.to = toISO(customTo)
+      } else {
+        filter.from = getFromDate(timeRange)
+        filter.to = new Date().toISOString()
+      }
+
       if (channelFilter) filter.channel = channelFilter
       if (statusFilter) filter.status = statusFilter
 
@@ -72,67 +101,93 @@ function Messages() {
     }
   }
 
-  function getDefaultFrom() {
-    const d = new Date()
-    d.setDate(d.getDate() - 7)
-    return d.toISOString().slice(0, 16)
-  }
-
-  function getDefaultTo() {
-    return new Date().toISOString().slice(0, 16)
-  }
-
   function handleReset() {
     setChannelFilter('')
     setStatusFilter('')
-    setFromDate(getDefaultFrom())
-    setToDate(getDefaultTo())
+    setTimeRange('7d')
+    setCustomFrom(() => {
+      const d = new Date()
+      d.setDate(d.getDate() - 7)
+      return d.toISOString().slice(0, 16)
+    })
+    setCustomTo(new Date().toISOString().slice(0, 16))
     setPage(1)
   }
+
+  const timeRangeOptions: { value: TimeRange; label: string }[] = [
+    { value: '1h', label: '最近1小时' },
+    { value: '24h', label: '最近24小时' },
+    { value: '7d', label: '最近7天' },
+    { value: '30d', label: '最近30天' },
+    { value: 'custom', label: '自定义' },
+  ]
 
   return (
     <div className="page">
       <h2 className="page-title">推送历史</h2>
       <p className="page-description">查看所有推送消息记录</p>
 
-      <div className="filter-bar">
-        <select
-          className="select-input"
-          value={channelFilter}
-          onChange={(e) => { setChannelFilter(e.target.value); setPage(1) }}
-          aria-label="频道筛选"
-        >
-          <option value="">全部频道</option>
-          {channels.map((ch) => (
-            <option key={ch.id} value={ch.name}>{ch.name}</option>
-          ))}
-        </select>
-        <select
-          className="select-input"
-          value={statusFilter}
-          onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}
-          aria-label="状态筛选"
-        >
-          <option value="">全部状态</option>
-          <option value="success">成功</option>
-          <option value="failed">失败</option>
-          <option value="pending">待推送</option>
-        </select>
-        <input
-          type="datetime-local"
-          className="text-input"
-          value={fromDate}
-          onChange={(e) => { setFromDate(e.target.value); setPage(1) }}
-          aria-label="开始时间"
-        />
-        <input
-          type="datetime-local"
-          className="text-input"
-          value={toDate}
-          onChange={(e) => { setToDate(e.target.value); setPage(1) }}
-          aria-label="结束时间"
-        />
-        <button className="btn btn--secondary" onClick={handleReset}>重置</button>
+      <div className="filter-bar" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '0.75rem' }}>
+        <div className="filter-row" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <span className="form-label" style={{ margin: 0, minWidth: 'fit-content' }}>时间范围:</span>
+          <div className="time-range-buttons" style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+            {timeRangeOptions.map((opt) => (
+              <button
+                key={opt.value}
+                className={`btn btn--sm ${timeRange === opt.value ? 'btn--primary' : 'btn--secondary'}`}
+                onClick={() => { setTimeRange(opt.value); setPage(1) }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          {timeRange === 'custom' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <input
+                type="datetime-local"
+                className="text-input"
+                value={customFrom}
+                onChange={(e) => { setCustomFrom(e.target.value); setPage(1) }}
+                aria-label="开始时间"
+              />
+              <span>至</span>
+              <input
+                type="datetime-local"
+                className="text-input"
+                value={customTo}
+                onChange={(e) => { setCustomTo(e.target.value); setPage(1) }}
+                aria-label="结束时间"
+              />
+            </div>
+          )}
+        </div>
+        <div className="filter-row" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <span className="form-label" style={{ margin: 0, minWidth: 'fit-content' }}>频道:</span>
+          <select
+            className="select-input"
+            value={channelFilter}
+            onChange={(e) => { setChannelFilter(e.target.value); setPage(1) }}
+            aria-label="频道筛选"
+          >
+            <option value="">全部频道</option>
+            {channels.map((ch) => (
+              <option key={ch.id} value={ch.name}>{ch.name}</option>
+            ))}
+          </select>
+          <span className="form-label" style={{ margin: 0, minWidth: 'fit-content' }}>状态:</span>
+          <select
+            className="select-input"
+            value={statusFilter}
+            onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}
+            aria-label="状态筛选"
+          >
+            <option value="">全部</option>
+            <option value="success">成功</option>
+            <option value="failed">失败</option>
+            <option value="pending">待推送</option>
+          </select>
+          <button className="btn btn--secondary btn--sm" onClick={handleReset}>重置</button>
+        </div>
       </div>
 
       {error && <div className="error-banner">{error}</div>}
