@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react'
-import { fetchReminders, createReminder, cancelReminder, Reminder, CreateReminderRequest } from '../api'
+import { fetchReminders, createReminder, updateReminder, cancelReminder, fetchChannels, Reminder, CreateReminderRequest, Channel } from '../api'
 import './Pages.css'
 
 type TabStatus = '' | 'active' | 'completed' | 'cancelled'
 
 function Reminders() {
   const [reminders, setReminders] = useState<Reminder[]>([])
+  const [channels, setChannels] = useState<Channel[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [activeTab, setActiveTab] = useState<TabStatus>('active')
   const [showForm, setShowForm] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
 
   // Form state
   const [formTitle, setFormTitle] = useState('')
@@ -21,9 +23,8 @@ function Reminders() {
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState('')
 
-  useEffect(() => {
-    loadReminders()
-  }, [activeTab])
+  useEffect(() => { loadReminders() }, [activeTab])
+  useEffect(() => { loadChannels() }, [])
 
   async function loadReminders() {
     setLoading(true)
@@ -38,7 +39,26 @@ function Reminders() {
     }
   }
 
-  async function handleCreate(e: React.FormEvent) {
+  async function loadChannels() {
+    try {
+      const res = await fetchChannels()
+      setChannels(res.data || [])
+    } catch { /* ignore */ }
+  }
+
+  function startEdit(r: Reminder) {
+    setEditingId(r.id)
+    setFormTitle(r.title)
+    setFormBody(r.body || '')
+    setFormTriggerAt(new Date(r.trigger_at).toISOString().slice(0, 16))
+    setFormChannel(r.channel)
+    setFormRepeat(r.repeat_type)
+    setFormRepeatRule(r.repeat_rule || '')
+    setShowForm(true)
+    setFormError('')
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSubmitting(true)
     setFormError('')
@@ -52,12 +72,16 @@ function Reminders() {
       if (formRepeat !== 'once') data.repeat = formRepeat
       if (formRepeatRule) data.repeat_rule = formRepeatRule
 
-      await createReminder(data)
+      if (editingId) {
+        await updateReminder(editingId, data)
+      } else {
+        await createReminder(data)
+      }
       resetForm()
       setShowForm(false)
       loadReminders()
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : '创建提醒失败')
+      setFormError(err instanceof Error ? err.message : '操作失败')
     } finally {
       setSubmitting(false)
     }
@@ -73,6 +97,27 @@ function Reminders() {
     }
   }
 
+  async function handleReactivate(r: Reminder) {
+    try {
+      // Reactivate by updating with a new trigger time (keep original or set to future)
+      const triggerAt = new Date(r.trigger_at)
+      const now = new Date()
+      // If trigger is in the past, set to 1 hour from now
+      const newTrigger = triggerAt > now ? triggerAt.toISOString() : new Date(now.getTime() + 3600000).toISOString()
+      await updateReminder(r.id, {
+        title: r.title,
+        body: r.body,
+        trigger_at: newTrigger,
+        channel: r.channel,
+        repeat: r.repeat_type,
+        repeat_rule: r.repeat_rule,
+      })
+      loadReminders()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '重新激活失败')
+    }
+  }
+
   function resetForm() {
     setFormTitle('')
     setFormBody('')
@@ -81,6 +126,7 @@ function Reminders() {
     setFormRepeat('once')
     setFormRepeatRule('')
     setFormError('')
+    setEditingId(null)
   }
 
   function formatTime(iso: string): string {
@@ -101,73 +147,41 @@ function Reminders() {
           <h2 className="page-title">提醒管理</h2>
           <p className="page-description">创建和管理定时提醒</p>
         </div>
-        <button className="btn btn--primary" onClick={() => setShowForm(!showForm)}>
-          {showForm ? '取消' : '+ 新建提醒'}
+        <button className="btn btn--primary" onClick={() => { if (showForm && !editingId) { resetForm(); setShowForm(false) } else { resetForm(); setShowForm(true) } }}>
+          {showForm && !editingId ? '取消' : '+ 新建提醒'}
         </button>
       </div>
 
       {showForm && (
         <div className="form-card">
-          <h3 className="form-title">创建提醒</h3>
+          <h3 className="form-title">{editingId ? '编辑提醒' : '创建提醒'}</h3>
           {formError && <div className="error-banner">{formError}</div>}
-          <form onSubmit={handleCreate} className="form-grid">
+          <form onSubmit={handleSubmit} className="form-grid">
             <div className="form-group">
               <label className="form-label" htmlFor="reminder-title">标题 *</label>
-              <input
-                id="reminder-title"
-                type="text"
-                className="text-input"
-                value={formTitle}
-                onChange={(e) => setFormTitle(e.target.value)}
-                required
-                maxLength={200}
-                placeholder="提醒标题"
-              />
+              <input id="reminder-title" type="text" className="text-input" value={formTitle} onChange={(e) => setFormTitle(e.target.value)} required maxLength={200} placeholder="提醒标题" />
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor="reminder-body">内容</label>
-              <textarea
-                id="reminder-body"
-                className="text-input textarea-input"
-                value={formBody}
-                onChange={(e) => setFormBody(e.target.value)}
-                maxLength={4000}
-                placeholder="提醒内容（可选）"
-              />
+              <textarea id="reminder-body" className="text-input textarea-input" value={formBody} onChange={(e) => setFormBody(e.target.value)} maxLength={4000} placeholder="提醒内容（可选）" />
             </div>
             <div className="form-row">
               <div className="form-group">
                 <label className="form-label" htmlFor="reminder-trigger">触发时间 *</label>
-                <input
-                  id="reminder-trigger"
-                  type="datetime-local"
-                  className="text-input"
-                  value={formTriggerAt}
-                  onChange={(e) => setFormTriggerAt(e.target.value)}
-                  required
-                />
+                <input id="reminder-trigger" type="datetime-local" className="text-input" value={formTriggerAt} onChange={(e) => setFormTriggerAt(e.target.value)} required />
               </div>
               <div className="form-group">
                 <label className="form-label" htmlFor="reminder-channel">频道</label>
-                <input
-                  id="reminder-channel"
-                  type="text"
-                  className="text-input"
-                  value={formChannel}
-                  onChange={(e) => setFormChannel(e.target.value)}
-                  placeholder="default"
-                />
+                <select id="reminder-channel" className="select-input" value={formChannel} onChange={(e) => setFormChannel(e.target.value)}>
+                  <option value="">默认</option>
+                  {channels.map((ch) => (<option key={ch.id} value={ch.name}>{ch.name}</option>))}
+                </select>
               </div>
             </div>
             <div className="form-row">
               <div className="form-group">
                 <label className="form-label" htmlFor="reminder-repeat">重复类型</label>
-                <select
-                  id="reminder-repeat"
-                  className="select-input"
-                  value={formRepeat}
-                  onChange={(e) => setFormRepeat(e.target.value)}
-                >
+                <select id="reminder-repeat" className="select-input" value={formRepeat} onChange={(e) => setFormRepeat(e.target.value)}>
                   <option value="once">一次性</option>
                   <option value="daily">每天</option>
                   <option value="weekly">每周</option>
@@ -177,24 +191,15 @@ function Reminders() {
               {(formRepeat === 'weekly' || formRepeat === 'cron') && (
                 <div className="form-group">
                   <label className="form-label" htmlFor="reminder-rule">重复规则</label>
-                  <input
-                    id="reminder-rule"
-                    type="text"
-                    className="text-input"
-                    value={formRepeatRule}
-                    onChange={(e) => setFormRepeatRule(e.target.value)}
-                    placeholder={formRepeat === 'weekly' ? '0-6 (周日-周六)' : 'cron 表达式'}
-                  />
+                  <input id="reminder-rule" type="text" className="text-input" value={formRepeatRule} onChange={(e) => setFormRepeatRule(e.target.value)} placeholder={formRepeat === 'weekly' ? '0-6 (周日-周六)' : 'cron 表达式'} />
                 </div>
               )}
             </div>
             <div className="form-actions">
               <button type="submit" className="btn btn--primary" disabled={submitting}>
-                {submitting ? '创建中...' : '创建提醒'}
+                {submitting ? '提交中...' : editingId ? '保存修改' : '创建提醒'}
               </button>
-              <button type="button" className="btn btn--secondary" onClick={() => { resetForm(); setShowForm(false) }}>
-                取消
-              </button>
+              <button type="button" className="btn btn--secondary" onClick={() => { resetForm(); setShowForm(false) }}>取消</button>
             </div>
           </form>
         </div>
@@ -202,11 +207,7 @@ function Reminders() {
 
       <div className="tabs">
         {tabs.map((tab) => (
-          <button
-            key={tab.value}
-            className={`tab-btn ${activeTab === tab.value ? 'tab-btn--active' : ''}`}
-            onClick={() => setActiveTab(tab.value)}
-          >
+          <button key={tab.value} className={`tab-btn ${activeTab === tab.value ? 'tab-btn--active' : ''}`} onClick={() => setActiveTab(tab.value)}>
             {tab.label}
           </button>
         ))}
@@ -225,26 +226,27 @@ function Reminders() {
               <div className="reminder-header">
                 <h4 className="reminder-title">{r.title}</h4>
                 <span className={`status-badge status-badge--${r.status === 'active' ? 'success' : r.status === 'cancelled' ? 'danger' : 'pending'}`}>
-                  {r.status}
+                  {r.status === 'active' ? '活跃' : r.status === 'cancelled' ? '已取消' : '已完成'}
                 </span>
               </div>
               {r.body && <p className="reminder-body">{r.body}</p>}
               <div className="reminder-meta">
                 <span>频道: {r.channel}</span>
                 <span>触发: {formatTime(r.trigger_at)}</span>
-                <span>重复: {r.repeat_type}</span>
+                <span>重复: {r.repeat_type === 'once' ? '一次性' : r.repeat_type === 'daily' ? '每天' : r.repeat_type === 'weekly' ? '每周' : r.repeat_type}</span>
                 {r.next_trigger && <span>下次: {formatTime(r.next_trigger)}</span>}
               </div>
-              {r.status === 'active' && (
-                <div className="reminder-actions">
-                  <button
-                    className="btn btn--danger btn--sm"
-                    onClick={() => handleCancel(r.id)}
-                  >
-                    取消提醒
-                  </button>
-                </div>
-              )}
+              <div className="reminder-actions">
+                {r.status === 'active' && (
+                  <>
+                    <button className="btn btn--secondary btn--sm" onClick={() => startEdit(r)}>编辑</button>
+                    <button className="btn btn--danger btn--sm" onClick={() => handleCancel(r.id)}>取消</button>
+                  </>
+                )}
+                {r.status === 'cancelled' && (
+                  <button className="btn btn--primary btn--sm" onClick={() => handleReactivate(r)}>重新激活</button>
+                )}
+              </div>
             </div>
           ))}
         </div>

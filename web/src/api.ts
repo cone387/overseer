@@ -260,6 +260,13 @@ export function createReminder(data: CreateReminderRequest): Promise<ApiResponse
   })
 }
 
+export function updateReminder(id: string, data: Partial<CreateReminderRequest>): Promise<ApiResponse<null>> {
+  return request<null>(`/api/reminders/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
 export function cancelReminder(id: string): Promise<ApiResponse<null>> {
   return request<null>(`/api/reminders/${id}`, {
     method: 'DELETE',

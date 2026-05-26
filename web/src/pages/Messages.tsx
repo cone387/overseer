@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { fetchMessages, Message, MessageFilter } from '../api'
+import { fetchMessages, fetchChannels, Message, MessageFilter, Channel } from '../api'
 import './Pages.css'
 
 function Messages() {
   const [messages, setMessages] = useState<Message[]>([])
+  const [channels, setChannels] = useState<Channel[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [pageSize] = useState(20)
@@ -21,9 +22,17 @@ function Messages() {
     return new Date().toISOString().slice(0, 16)
   })
 
+  useEffect(() => { loadChannels() }, [])
   useEffect(() => {
     loadMessages()
   }, [page, channelFilter, statusFilter, fromDate, toDate])
+
+  async function loadChannels() {
+    try {
+      const res = await fetchChannels()
+      setChannels(res.data || [])
+    } catch { /* ignore */ }
+  }
 
   async function loadMessages() {
     setLoading(true)
@@ -87,14 +96,17 @@ function Messages() {
       <p className="page-description">查看所有推送消息记录</p>
 
       <div className="filter-bar">
-        <input
-          type="text"
-          className="text-input"
-          placeholder="频道筛选"
+        <select
+          className="select-input"
           value={channelFilter}
           onChange={(e) => { setChannelFilter(e.target.value); setPage(1) }}
           aria-label="频道筛选"
-        />
+        >
+          <option value="">全部频道</option>
+          {channels.map((ch) => (
+            <option key={ch.id} value={ch.name}>{ch.name}</option>
+          ))}
+        </select>
         <select
           className="select-input"
           value={statusFilter}

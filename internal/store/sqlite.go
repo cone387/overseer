@@ -253,9 +253,9 @@ func (s *SQLiteStore) CreateReminder(r *model.Reminder) error {
 func (s *SQLiteStore) UpdateReminder(r *model.Reminder) error {
 	result, err := s.db.Exec(`
 		UPDATE reminders
-		SET title = ?, body = ?, channel = ?, trigger_at = ?, repeat_type = ?, repeat_rule = ?, next_trigger = ?, updated_at = ?
+		SET title = ?, body = ?, channel = ?, trigger_at = ?, repeat_type = ?, repeat_rule = ?, status = ?, next_trigger = ?, updated_at = ?
 		WHERE id = ?`,
-		r.Title, r.Body, r.Channel, r.TriggerAt, string(r.RepeatType), r.RepeatRule, r.NextTrigger, time.Now(),
+		r.Title, r.Body, r.Channel, r.TriggerAt, string(r.RepeatType), r.RepeatRule, r.Status, r.NextTrigger, time.Now(),
 		r.ID,
 	)
 	if err != nil {

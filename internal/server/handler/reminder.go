@@ -287,6 +287,11 @@ func (h *ReminderHandler) Update(c *gin.Context) {
 
 	existing.UpdatedAt = time.Now()
 
+	// Reactivate if the reminder was cancelled or completed
+	if existing.Status == "cancelled" || existing.Status == "completed" {
+		existing.Status = "active"
+	}
+
 	if err := h.store.UpdateReminder(existing); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
