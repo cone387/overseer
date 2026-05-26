@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8080:8080"
+      - "9721:9721"
     volumes:
       - ./config.yaml:/etc/overseer/config.yaml:ro
       - overseer-data:/data

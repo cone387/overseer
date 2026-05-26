@@ -53,6 +53,6 @@ WORKDIR /data
 # Default environment
 ENV OVERSEER_CONFIG_PATH=/etc/overseer/config.yaml
 
-EXPOSE 8080
+EXPOSE 9721
 
 ENTRYPOINT ["/usr/local/bin/overseer"]

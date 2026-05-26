@@ -22,3 +22,6 @@ Thumbs.db
 # Web frontend
 web/node_modules/
 web/dist/
+
+# Config (contains secrets)
+config.yaml
