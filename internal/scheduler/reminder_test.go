@@ -33,6 +33,12 @@ func (m *mockStore) QueryMessages(_ store.MessageFilter) (*model.PagedResult[mod
 func (m *mockStore) GetChannelStats(_, _ time.Time) ([]model.ChannelStats, error) { return nil, nil }
 func (m *mockStore) Close() error                                                  { return nil }
 func (m *mockStore) Migrate() error                                                { return nil }
+func (m *mockStore) CreateDevice(_ *model.Device) error                            { return nil }
+func (m *mockStore) UpdateDevice(_ *model.Device) error                            { return nil }
+func (m *mockStore) DeleteDevice(_ string) error                                   { return nil }
+func (m *mockStore) ListDevices() ([]model.Device, error)                          { return nil, nil }
+func (m *mockStore) GetDefaultDevice() (*model.Device, error)                      { return nil, nil }
+func (m *mockStore) SetDefaultDevice(_ string) error                               { return nil }
 
 func (m *mockStore) CreateReminder(r *model.Reminder) error {
 	m.mu.Lock()

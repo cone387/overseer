@@ -86,6 +86,42 @@ func (m *mockStore) Migrate() error {
 	return args.Error(0)
 }
 
+func (m *mockStore) CreateDevice(d *model.Device) error {
+	args := m.Called(d)
+	return args.Error(0)
+}
+
+func (m *mockStore) UpdateDevice(d *model.Device) error {
+	args := m.Called(d)
+	return args.Error(0)
+}
+
+func (m *mockStore) DeleteDevice(id string) error {
+	args := m.Called(id)
+	return args.Error(0)
+}
+
+func (m *mockStore) ListDevices() ([]model.Device, error) {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]model.Device), args.Error(1)
+}
+
+func (m *mockStore) GetDefaultDevice() (*model.Device, error) {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*model.Device), args.Error(1)
+}
+
+func (m *mockStore) SetDefaultDevice(id string) error {
+	args := m.Called(id)
+	return args.Error(0)
+}
+
 // setupRouter creates a Gin engine with the webhook handler registered.
 // Used by webhook_test.go.
 func setupRouter(handler MessageHandler) *gin.Engine {

@@ -175,3 +175,49 @@ export function sendTestPush(data: PushRequest): Promise<ApiResponse<PushResult>
     body: JSON.stringify(data),
   })
 }
+
+// Devices
+export interface Device {
+  id: string
+  name: string
+  device_key: string
+  is_default: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateDeviceRequest {
+  name: string
+  device_key: string
+  is_default?: boolean
+}
+
+export function fetchDevices(): Promise<ApiResponse<Device[]>> {
+  return request<Device[]>('/api/devices')
+}
+
+export function createDevice(data: CreateDeviceRequest): Promise<ApiResponse<Device>> {
+  return request<Device>('/api/devices', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export function updateDevice(id: string, data: Partial<CreateDeviceRequest>): Promise<ApiResponse<null>> {
+  return request<null>(`/api/devices/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export function deleteDevice(id: string): Promise<ApiResponse<null>> {
+  return request<null>(`/api/devices/${id}`, {
+    method: 'DELETE',
+  })
+}
+
+export function setDefaultDevice(id: string): Promise<ApiResponse<null>> {
+  return request<null>(`/api/devices/${id}/default`, {
+    method: 'POST',
+  })
+}

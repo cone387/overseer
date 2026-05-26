@@ -298,6 +298,10 @@ func main() {
 	reminderHandler := handler.NewReminderHandler(db, reminderScheduler.Schedule, reminderScheduler.Cancel)
 	reminderHandler.RegisterRoutes(api)
 
+	// Device API
+	deviceHandler := handler.NewDeviceHandler(db)
+	deviceHandler.RegisterRoutes(api)
+
 	// Serve embedded frontend static files with SPA fallback
 	distFS, err := fs.Sub(overseer.WebDist, "web/dist")
 	if err != nil {

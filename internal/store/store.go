@@ -37,6 +37,14 @@ type Store interface {
 	GetActiveReminders() ([]model.Reminder, error)
 	UpdateNextTrigger(id string, next time.Time) error
 
+	// Device operations
+	CreateDevice(d *model.Device) error
+	UpdateDevice(d *model.Device) error
+	DeleteDevice(id string) error
+	ListDevices() ([]model.Device, error)
+	GetDefaultDevice() (*model.Device, error)
+	SetDefaultDevice(id string) error
+
 	// Lifecycle
 	Close() error
 	Migrate() error

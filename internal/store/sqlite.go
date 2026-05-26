@@ -42,12 +42,12 @@ func NewSQLiteStore(dsn string) (*SQLiteStore, error) {
 	return &SQLiteStore{db: db}, nil
 }
 
-// migrationStatements aggregates all migration SQL from the migrations package.
-var migrationStatements = migrations.InitialMigration
+// allMigrations aggregates all migration SQL from the migrations package.
+var allMigrations = append(migrations.InitialMigration, migrations.DevicesMigration...)
 
 // Migrate creates or upgrades the database schema.
 func (s *SQLiteStore) Migrate() error {
-	for _, stmt := range migrationStatements {
+	for _, stmt := range allMigrations {
 		if _, err := s.db.Exec(stmt); err != nil {
 			return fmt.Errorf("migrate: %w", err)
 		}
@@ -382,3 +382,108 @@ func scanReminders(rows *sql.Rows) ([]model.Reminder, error) {
 }
 
 
+
+// --- Device operations ---
+
+func (s *SQLiteStore) CreateDevice(d *model.Device) error {
+	_, err := s.db.Exec(`
+		INSERT INTO devices (id, name, device_key, is_default, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		d.ID, d.Name, d.DeviceKey, boolToInt(d.IsDefault), d.CreatedAt, d.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("create device: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) UpdateDevice(d *model.Device) error {
+	result, err := s.db.Exec(`
+		UPDATE devices SET name = ?, device_key = ?, is_default = ?, updated_at = ?
+		WHERE id = ?`,
+		d.Name, d.DeviceKey, boolToInt(d.IsDefault), time.Now(), d.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("update device: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("update device: not found")
+	}
+	return nil
+}
+
+func (s *SQLiteStore) DeleteDevice(id string) error {
+	result, err := s.db.Exec(`DELETE FROM devices WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete device: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("delete device: not found")
+	}
+	return nil
+}
+
+func (s *SQLiteStore) ListDevices() ([]model.Device, error) {
+	rows, err := s.db.Query(`
+		SELECT id, name, device_key, is_default, created_at, updated_at
+		FROM devices ORDER BY is_default DESC, created_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("list devices: %w", err)
+	}
+	defer rows.Close()
+
+	var devices []model.Device
+	for rows.Next() {
+		var d model.Device
+		var isDefault int
+		if err := rows.Scan(&d.ID, &d.Name, &d.DeviceKey, &isDefault, &d.CreatedAt, &d.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan device: %w", err)
+		}
+		d.IsDefault = isDefault != 0
+		devices = append(devices, d)
+	}
+	return devices, rows.Err()
+}
+
+func (s *SQLiteStore) GetDefaultDevice() (*model.Device, error) {
+	var d model.Device
+	var isDefault int
+	err := s.db.QueryRow(`
+		SELECT id, name, device_key, is_default, created_at, updated_at
+		FROM devices WHERE is_default = 1 LIMIT 1`).
+		Scan(&d.ID, &d.Name, &d.DeviceKey, &isDefault, &d.CreatedAt, &d.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get default device: %w", err)
+	}
+	d.IsDefault = true
+	return &d, nil
+}
+
+func (s *SQLiteStore) SetDefaultDevice(id string) error {
+	// Clear all defaults first
+	if _, err := s.db.Exec(`UPDATE devices SET is_default = 0`); err != nil {
+		return fmt.Errorf("clear default device: %w", err)
+	}
+	// Set the new default
+	result, err := s.db.Exec(`UPDATE devices SET is_default = 1, updated_at = ? WHERE id = ?`, time.Now(), id)
+	if err != nil {
+		return fmt.Errorf("set default device: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("set default device: not found")
+	}
+	return nil
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}

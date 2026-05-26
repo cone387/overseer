@@ -579,3 +579,82 @@
   color: var(--color-text-secondary, #6b7280);
   margin-top: 4px;
 }
+
+/* Device management */
+.device-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.device-card {
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.device-card--default {
+  border-color: var(--color-primary, #3b82f6);
+  border-width: 2px;
+}
+
+.device-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.device-name {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 4px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.device-badge {
+  font-size: 0.7rem;
+  background: var(--color-primary, #3b82f6);
+  color: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.device-key {
+  font-family: monospace;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.device-meta {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #6b7280);
+  margin-top: 8px;
+}
+
+.device-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.placeholder-hint {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary, #6b7280);
+  margin-top: 4px;
+}
+
+.form-label--checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.form-label--checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+}

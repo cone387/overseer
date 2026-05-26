@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard'
 import Messages from './pages/Messages'
 import Reminders from './pages/Reminders'
 import Push from './pages/Push'
+import Devices from './pages/Devices'
 
 function App() {
   return (
@@ -13,6 +14,7 @@ function App() {
         <Route path="messages" element={<Messages />} />
         <Route path="reminders" element={<Reminders />} />
         <Route path="push" element={<Push />} />
+        <Route path="devices" element={<Devices />} />
       </Route>
     </Routes>
   )
