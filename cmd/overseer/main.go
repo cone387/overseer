@@ -97,6 +97,20 @@ func main() {
 	wsHub := ws.NewHub(20)
 	go wsHub.Run()
 
+	// Helper: get default device key from database
+	getDefaultDeviceKey := func() string {
+		device, err := db.GetDefaultDevice()
+		if err == nil && device != nil {
+			return device.DeviceKey
+		}
+		// Fallback: get first device from DB
+		devices, err := db.ListDevices()
+		if err == nil && len(devices) > 0 {
+			return devices[0].DeviceKey
+		}
+		return ""
+	}
+
 	// Define the push function used by escalator and reminder scheduler
 	pushFunc := func(msg *model.Message) error {
 		ch, tmplName := msgRouter.Route(msg)
@@ -113,7 +127,7 @@ func main() {
 			Title: msg.Title,
 			Body:  msg.Body,
 		}
-		results := barkPusher.PushToChannel(context.Background(), req, *ch, cfg.Bark.DeviceKey)
+		results := barkPusher.PushToChannel(context.Background(), req, *ch, getDefaultDeviceKey())
 
 		// Determine overall success
 		anySuccess := false
@@ -204,7 +218,7 @@ func main() {
 			Title: msg.Title,
 			Body:  msg.Body,
 		}
-		results := barkPusher.PushToChannel(context.Background(), req, *ch, cfg.Bark.DeviceKey)
+		results := barkPusher.PushToChannel(context.Background(), req, *ch, getDefaultDeviceKey())
 
 		// Determine overall success
 		anySuccess := false
@@ -259,7 +273,7 @@ func main() {
 			Title: msg.Title,
 			Body:  msg.Body,
 		}
-		results := barkPusher.PushToChannel(context.Background(), req, *ch, cfg.Bark.DeviceKey)
+		results := barkPusher.PushToChannel(context.Background(), req, *ch, getDefaultDeviceKey())
 
 		for _, r := range results {
 			if r.Success {

@@ -34,9 +34,6 @@ func validateRequiredFields(cfg *Config) []string {
 	if cfg.Bark.ServerURL == "" {
 		errs = append(errs, "  - 缺少必填字段: bark.server_url")
 	}
-	if cfg.Bark.DeviceKey == "" {
-		errs = append(errs, "  - 缺少必填字段: bark.device_key")
-	}
 
 	return errs
 }
@@ -95,17 +92,9 @@ func validateRuleRegex(cfg *Config) []string {
 }
 
 // validateDeviceKeyAvailability checks that every channel has a usable device_key.
-// If a channel has no device_keys configured, the global bark.device_key must be set.
+// validateDeviceKeyAvailability is no longer needed since devices are managed via the web UI.
 func validateDeviceKeyAvailability(cfg *Config) []string {
-	var errs []string
-
-	for _, ch := range cfg.Channels {
-		if len(ch.DeviceKeys) == 0 && cfg.Bark.DeviceKey == "" {
-			errs = append(errs, fmt.Sprintf("  - Channel %q 未配置 device_keys 且全局 bark.device_key 也未配置", ch.Name))
-		}
-	}
-
-	return errs
+	return nil
 }
 
 // isValidURL checks whether s is a valid URL with a scheme and host.

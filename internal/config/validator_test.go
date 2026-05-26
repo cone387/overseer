@@ -48,15 +48,6 @@ func TestValidate_MissingServerURL(t *testing.T) {
 	assert.Contains(t, err.Error(), "bark.server_url")
 }
 
-func TestValidate_MissingDeviceKey(t *testing.T) {
-	cfg := validConfig()
-	cfg.Bark.DeviceKey = ""
-
-	err := validateConfig(cfg)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "bark.device_key")
-}
-
 func TestValidate_MultipleRequiredFieldsMissing(t *testing.T) {
 	cfg := &Config{}
 
@@ -64,7 +55,6 @@ func TestValidate_MultipleRequiredFieldsMissing(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "server.port")
 	assert.Contains(t, err.Error(), "bark.server_url")
-	assert.Contains(t, err.Error(), "bark.device_key")
 }
 
 // --- Field constraints ---
@@ -194,42 +184,16 @@ func TestValidate_EmptyContentRegexSkipped(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-// --- Device key availability ---
+// --- Device key availability (now managed via web UI, no config validation) ---
 
-func TestValidate_ChannelWithoutDeviceKeysAndNoGlobal(t *testing.T) {
+func TestValidate_ChannelWithoutDeviceKeysNoError(t *testing.T) {
 	cfg := validConfig()
 	cfg.Bark.DeviceKey = ""
 	cfg.Channels = []Channel{
 		{Name: "urgent"},
 	}
 
-	err := validateConfig(cfg)
-	require.Error(t, err)
-	// Should report both missing bark.device_key and channel device_key issue
-	assert.Contains(t, err.Error(), "bark.device_key")
-}
-
-func TestValidate_ChannelWithDeviceKeysNoGlobal(t *testing.T) {
-	cfg := validConfig()
-	cfg.Bark.DeviceKey = ""
-	cfg.Channels = []Channel{
-		{Name: "urgent", DeviceKeys: []string{"device-1"}},
-	}
-
-	err := validateConfig(cfg)
-	require.Error(t, err)
-	// Still fails because bark.device_key is required
-	assert.Contains(t, err.Error(), "bark.device_key")
-	// But no channel device_key error since channel has its own
-	assert.NotContains(t, err.Error(), "Channel \"urgent\" 未配置 device_keys")
-}
-
-func TestValidate_ChannelWithoutDeviceKeysButGlobalExists(t *testing.T) {
-	cfg := validConfig()
-	cfg.Channels = []Channel{
-		{Name: "urgent"},
-	}
-
+	// No longer an error - devices are managed via web UI
 	err := validateConfig(cfg)
 	assert.NoError(t, err)
 }
