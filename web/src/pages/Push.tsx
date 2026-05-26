@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { sendPush, sendTestPush, PushRequest, fetchDevices, Device } from '../api'
+import { sendPush, PushRequest, fetchDevices, Device } from '../api'
 import './Pages.css'
 
 interface PushResultDisplay {
@@ -118,19 +118,6 @@ function Push() {
       setResult({ success: true, message: '推送成功', id: res.data.id })
     } catch (err) {
       setResult({ success: false, message: err instanceof Error ? err.message : '推送失败' })
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  async function handleTest() {
-    setSubmitting(true)
-    setResult(null)
-    try {
-      const res = await sendTestPush(buildRequest())
-      setResult({ success: true, message: '测试推送成功（不记录历史）', id: res.data.id })
-    } catch (err) {
-      setResult({ success: false, message: err instanceof Error ? err.message : '测试推送失败' })
     } finally {
       setSubmitting(false)
     }
@@ -365,13 +352,6 @@ function Push() {
               disabled={submitting || !title || !body}
             >
               {submitting ? '发送中...' : '发送推送'}
-            </button>
-            <button
-              className="btn btn--secondary"
-              onClick={handleTest}
-              disabled={submitting || !title || !body}
-            >
-              测试推送
             </button>
             <button className="btn btn--secondary" onClick={handleReset}>
               重置
