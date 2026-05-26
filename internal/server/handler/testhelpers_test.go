@@ -153,6 +153,70 @@ func (m *mockStore) GetChannelByName(name string) (*model.Channel, error) {
 	return args.Get(0).(*model.Channel), args.Error(1)
 }
 
+// --- Auth mock methods ---
+
+func (m *mockStore) CreateUser(u *model.User) error {
+	args := m.Called(u)
+	return args.Error(0)
+}
+
+func (m *mockStore) GetUserByUsername(username string) (*model.User, error) {
+	args := m.Called(username)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*model.User), args.Error(1)
+}
+
+func (m *mockStore) GetUserCount() (int, error) {
+	args := m.Called()
+	return args.Int(0), args.Error(1)
+}
+
+func (m *mockStore) UpdateUserPassword(id string, passwordHash string) error {
+	args := m.Called(id, passwordHash)
+	return args.Error(0)
+}
+
+func (m *mockStore) CreateAPIKey(key *model.APIKey) error {
+	args := m.Called(key)
+	return args.Error(0)
+}
+
+func (m *mockStore) ListAPIKeys(userID string) ([]model.APIKey, error) {
+	args := m.Called(userID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]model.APIKey), args.Error(1)
+}
+
+func (m *mockStore) DeleteAPIKey(id string) error {
+	args := m.Called(id)
+	return args.Error(0)
+}
+
+func (m *mockStore) GetAPIKeyByHash(keyHash string) (*model.APIKey, error) {
+	args := m.Called(keyHash)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*model.APIKey), args.Error(1)
+}
+
+func (m *mockStore) UpdateAPIKeyLastUsed(id string) error {
+	args := m.Called(id)
+	return args.Error(0)
+}
+
+func (m *mockStore) ValidateAPIKey(rawKey string) (*model.APIKey, error) {
+	args := m.Called(rawKey)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*model.APIKey), args.Error(1)
+}
+
 // setupRouter creates a Gin engine with the webhook handler registered.
 // Used by webhook_test.go.
 func setupRouter(handler MessageHandler) *gin.Engine {

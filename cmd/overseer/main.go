@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -45,6 +47,17 @@ func main() {
 		log.Fatalf("[overseer] config validation failed: %v", err)
 	}
 	log.Println("[overseer] configuration loaded and validated")
+
+	// Auto-generate JWT secret if not configured
+	jwtSecret := cfg.Server.JWTSecret
+	if jwtSecret == "" {
+		secretBytes := make([]byte, 32)
+		if _, err := rand.Read(secretBytes); err != nil {
+			log.Fatalf("[overseer] failed to generate JWT secret: %v", err)
+		}
+		jwtSecret = base64.URLEncoding.EncodeToString(secretBytes)
+		log.Println("[overseer] WARNING: jwt_secret not configured, using auto-generated secret (sessions will not persist across restarts)")
+	}
 
 	// Initialize SQLite store and run migrations
 	db, err := store.NewSQLiteStore("overseer.db")
@@ -268,13 +281,17 @@ func main() {
 	healthHandler := handler.NewHealthHandler()
 	healthHandler.Register(engine)
 
-	// WebSocket - token-based auth
-	wsHandler := handler.NewWSHandler(wsHub, cfg.Server.APIKey)
+	// Auth endpoints - no auth required
+	authHandler := handler.NewAuthHandler(db, jwtSecret)
+	authHandler.RegisterRoutes(engine)
+
+	// WebSocket - JWT token-based auth via query param
+	wsHandler := handler.NewWSHandler(wsHub, jwtSecret)
 	wsHandler.Register(engine)
 
-	// Authenticated API routes
+	// Authenticated API routes (accepts JWT or API Key)
 	authGroup := engine.Group("/")
-	authGroup.Use(middleware.APIKeyAuth(cfg.Server.APIKey))
+	authGroup.Use(middleware.APIKeyOrJWTAuth(db, jwtSecret))
 
 	// Webhook endpoint
 	webhookHandler := handler.NewWebhookHandler(messageHandler)
@@ -285,6 +302,13 @@ func main() {
 	api := authGroup.Group("/api")
 	api.POST("/push", pushHandler.HandlePush)
 	api.POST("/push/test", pushHandler.HandleTestPush)
+
+	// Auth protected routes (change-password, me)
+	authHandler.RegisterProtectedRoutes(api)
+
+	// API Keys management (requires JWT auth)
+	apiKeysHandler := handler.NewAPIKeysHandler(db)
+	apiKeysHandler.RegisterRoutes(api)
 
 	// History API
 	historyHandler := handler.NewHistoryHandler(db)

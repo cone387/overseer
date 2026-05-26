@@ -1,11 +1,38 @@
-const API_KEY_STORAGE_KEY = 'overseer_api_key'
+// ─── Auth Types ───────────────────────────────────────────────────────────────
 
-export function getApiKey(): string {
-  return localStorage.getItem(API_KEY_STORAGE_KEY) || ''
+export interface AuthStatus {
+  initialized: boolean
+  authenticated: boolean
 }
 
-export function setApiKey(key: string): void {
-  localStorage.setItem(API_KEY_STORAGE_KEY, key)
+export interface AuthUser {
+  id: string
+  username: string
+}
+
+export interface LoginResponse {
+  token: string
+  user: AuthUser
+}
+
+export interface APIKey {
+  id: string
+  name: string
+  key?: string
+  prefix: string
+  last_used?: string
+  created_at: string
+}
+
+// ─── Core Request Helper ─────────────────────────────────────────────────────
+
+export class ApiError extends Error {
+  code: number
+  constructor(code: number, message: string) {
+    super(message)
+    this.code = code
+    this.name = 'ApiError'
+  }
 }
 
 interface ApiResponse<T = unknown> {
@@ -27,16 +54,15 @@ async function request<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
-  const apiKey = getApiKey()
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...(apiKey ? { 'X-API-Key': apiKey } : {}),
     ...(options.headers as Record<string, string> || {}),
   }
 
   const res = await fetch(path, {
     ...options,
     headers,
+    credentials: 'same-origin',
   })
 
   const json = await res.json()
@@ -46,16 +72,109 @@ async function request<T>(
   return json as ApiResponse<T>
 }
 
-export class ApiError extends Error {
-  code: number
-  constructor(code: number, message: string) {
-    super(message)
-    this.code = code
-    this.name = 'ApiError'
+// ─── Auth API ────────────────────────────────────────────────────────────────
+
+export async function checkAuthStatus(): Promise<AuthStatus> {
+  const res = await fetch('/api/auth/status', { credentials: 'same-origin' })
+  const json = await res.json()
+  return json as AuthStatus
+}
+
+export async function register(username: string, password: string): Promise<LoginResponse> {
+  const res = await fetch('/api/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ username, password }),
+  })
+  const json = await res.json()
+  if (!res.ok) {
+    throw new ApiError(json.code || res.status, json.message || '注册失败')
+  }
+  return json as LoginResponse
+}
+
+export async function login(username: string, password: string): Promise<LoginResponse> {
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ username, password }),
+  })
+  const json = await res.json()
+  if (!res.ok) {
+    throw new ApiError(json.code || res.status, json.message || '登录失败')
+  }
+  return json as LoginResponse
+}
+
+export async function logout(): Promise<void> {
+  await fetch('/api/auth/logout', {
+    method: 'POST',
+    credentials: 'same-origin',
+  })
+}
+
+export async function changePassword(old_password: string, new_password: string): Promise<void> {
+  const res = await fetch('/api/auth/change-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ old_password, new_password }),
+  })
+  if (!res.ok) {
+    const json = await res.json().catch(() => null)
+    throw new ApiError(res.status, json?.message || '修改密码失败')
   }
 }
 
-// Stats
+export async function getMe(): Promise<AuthUser> {
+  const res = await fetch('/api/auth/me', { credentials: 'same-origin' })
+  const json = await res.json()
+  if (!res.ok) {
+    throw new ApiError(json.code || res.status, json.message || '获取用户信息失败')
+  }
+  return json as AuthUser
+}
+
+// ─── API Key Management ──────────────────────────────────────────────────────
+
+export async function listAPIKeys(): Promise<APIKey[]> {
+  const res = await fetch('/api/keys', { credentials: 'same-origin' })
+  const json = await res.json()
+  if (!res.ok) {
+    throw new ApiError(json.code || res.status, json.message || '获取 API Key 列表失败')
+  }
+  return (json as { keys: APIKey[] }).keys
+}
+
+export async function createAPIKey(name: string): Promise<APIKey> {
+  const res = await fetch('/api/keys', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ name }),
+  })
+  const json = await res.json()
+  if (!res.ok) {
+    throw new ApiError(json.code || res.status, json.message || '创建 API Key 失败')
+  }
+  return json as APIKey
+}
+
+export async function deleteAPIKey(id: string): Promise<void> {
+  const res = await fetch(`/api/keys/${id}`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+  })
+  if (!res.ok) {
+    const json = await res.json().catch(() => null)
+    throw new ApiError(res.status, json?.message || '删除 API Key 失败')
+  }
+}
+
+// ─── Stats ───────────────────────────────────────────────────────────────────
+
 export interface ChannelStat {
   channel: string
   total: number
@@ -68,7 +187,8 @@ export function fetchStats(from: string, to: string): Promise<ApiResponse<Channe
   return request<ChannelStat[]>(`/api/stats?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
 }
 
-// Messages
+// ─── Messages ────────────────────────────────────────────────────────────────
+
 export interface Message {
   id: string
   source: string
@@ -101,7 +221,8 @@ export function fetchMessages(filter: MessageFilter): Promise<ApiResponse<PagedD
   return request<PagedData<Message>>(`/api/messages?${params.toString()}`)
 }
 
-// Reminders
+// ─── Reminders ───────────────────────────────────────────────────────────────
+
 export interface Reminder {
   id: string
   title: string
@@ -144,7 +265,8 @@ export function cancelReminder(id: string): Promise<ApiResponse<null>> {
   })
 }
 
-// Push
+// ─── Push ────────────────────────────────────────────────────────────────────
+
 export interface PushRequest {
   title: string
   body: string
@@ -177,7 +299,8 @@ export function sendTestPush(data: PushRequest): Promise<ApiResponse<PushResult>
   })
 }
 
-// Devices
+// ─── Devices ─────────────────────────────────────────────────────────────────
+
 export interface Device {
   id: string
   name: string
@@ -223,8 +346,8 @@ export function setDefaultDevice(id: string): Promise<ApiResponse<null>> {
   })
 }
 
+// ─── Channels ────────────────────────────────────────────────────────────────
 
-// Channels
 export interface Channel {
   id: string
   name: string

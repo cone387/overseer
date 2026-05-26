@@ -4,7 +4,9 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
+	"github.com/overseer/overseer/internal/server/middleware"
 	"github.com/overseer/overseer/internal/ws"
 )
 
@@ -18,33 +20,49 @@ var upgrader = websocket.Upgrader{
 
 // WSHandler handles WebSocket upgrade requests.
 type WSHandler struct {
-	hub    *ws.Hub
-	apiKey string
+	hub       *ws.Hub
+	jwtSecret string
 }
 
-// NewWSHandler creates a new WSHandler with the given Hub and API key.
-func NewWSHandler(hub *ws.Hub, apiKey string) *WSHandler {
+// NewWSHandler creates a new WSHandler with the given Hub and JWT secret.
+func NewWSHandler(hub *ws.Hub, jwtSecret string) *WSHandler {
 	return &WSHandler{
-		hub:    hub,
-		apiKey: apiKey,
+		hub:       hub,
+		jwtSecret: jwtSecret,
 	}
 }
 
 // Register registers the WebSocket route on the given engine.
 // The /ws endpoint uses query parameter token for authentication
-// instead of the standard X-API-Key header middleware.
+// instead of the standard middleware.
 func (h *WSHandler) Register(engine *gin.Engine) {
 	engine.GET("/ws", h.HandleWS)
 }
 
 // HandleWS upgrades the HTTP connection to a WebSocket connection.
-// Authentication is performed via the "token" query parameter.
+// Authentication is performed via the "token" query parameter (JWT).
 func (h *WSHandler) HandleWS(c *gin.Context) {
 	token := c.Query("token")
-	if token == "" || token != h.apiKey {
+	if token == "" {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 			"code":    401,
-			"message": "unauthorized: invalid or missing token",
+			"message": "unauthorized: missing token",
+		})
+		return
+	}
+
+	// Validate JWT token
+	claims := &middleware.JWTClaims{}
+	parsed, err := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, jwt.ErrSignatureInvalid
+		}
+		return []byte(h.jwtSecret), nil
+	})
+	if err != nil || !parsed.Valid {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+			"code":    401,
+			"message": "unauthorized: invalid token",
 		})
 		return
 	}

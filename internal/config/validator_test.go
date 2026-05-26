@@ -11,8 +11,7 @@ import (
 func validConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
-			Port:   8080,
-			APIKey: "test-api-key-1234567890",
+			Port: 8080,
 		},
 		Bark: BarkConfig{
 			ServerURL: "https://api.day.app",
@@ -40,15 +39,6 @@ func TestValidate_MissingServerPort(t *testing.T) {
 	assert.Contains(t, err.Error(), "server.port")
 }
 
-func TestValidate_MissingAPIKey(t *testing.T) {
-	cfg := validConfig()
-	cfg.Server.APIKey = ""
-
-	err := validateConfig(cfg)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "server.api_key")
-}
-
 func TestValidate_MissingServerURL(t *testing.T) {
 	cfg := validConfig()
 	cfg.Bark.ServerURL = ""
@@ -73,7 +63,6 @@ func TestValidate_MultipleRequiredFieldsMissing(t *testing.T) {
 	err := validateConfig(cfg)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "server.port")
-	assert.Contains(t, err.Error(), "server.api_key")
 	assert.Contains(t, err.Error(), "bark.server_url")
 	assert.Contains(t, err.Error(), "bark.device_key")
 }
@@ -108,24 +97,6 @@ func TestValidate_PortBoundaryValid(t *testing.T) {
 
 	cfg.Server.Port = 65535
 	assert.NoError(t, validateConfig(cfg))
-}
-
-func TestValidate_APIKeyTooShort(t *testing.T) {
-	cfg := validConfig()
-	cfg.Server.APIKey = "short123" // 8 chars
-
-	err := validateConfig(cfg)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "server.api_key")
-	assert.Contains(t, err.Error(), "16")
-}
-
-func TestValidate_APIKeyExactly16(t *testing.T) {
-	cfg := validConfig()
-	cfg.Server.APIKey = "1234567890123456" // exactly 16
-
-	err := validateConfig(cfg)
-	assert.NoError(t, err)
 }
 
 func TestValidate_ServerURLInvalid(t *testing.T) {
@@ -228,7 +199,6 @@ func TestValidate_EmptyContentRegexSkipped(t *testing.T) {
 func TestValidate_ChannelWithoutDeviceKeysAndNoGlobal(t *testing.T) {
 	cfg := validConfig()
 	cfg.Bark.DeviceKey = ""
-	cfg.Server.APIKey = "1234567890123456"
 	cfg.Channels = []Channel{
 		{Name: "urgent"},
 	}
@@ -242,7 +212,6 @@ func TestValidate_ChannelWithoutDeviceKeysAndNoGlobal(t *testing.T) {
 func TestValidate_ChannelWithDeviceKeysNoGlobal(t *testing.T) {
 	cfg := validConfig()
 	cfg.Bark.DeviceKey = ""
-	cfg.Server.APIKey = "1234567890123456"
 	cfg.Channels = []Channel{
 		{Name: "urgent", DeviceKeys: []string{"device-1"}},
 	}
@@ -270,8 +239,7 @@ func TestValidate_ChannelWithoutDeviceKeysButGlobalExists(t *testing.T) {
 func TestValidate_MultipleErrors(t *testing.T) {
 	cfg := &Config{
 		Server: ServerConfig{
-			Port:   99999,
-			APIKey: "short",
+			Port: 99999,
 		},
 		Bark: BarkConfig{
 			ServerURL: "invalid",
@@ -289,7 +257,6 @@ func TestValidate_MultipleErrors(t *testing.T) {
 	err := validateConfig(cfg)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "server.port")
-	assert.Contains(t, err.Error(), "server.api_key")
 	assert.Contains(t, err.Error(), "bark.server_url")
 	assert.Contains(t, err.Error(), "Channel 名称重复")
 	assert.Contains(t, err.Error(), "正则表达式语法无效")

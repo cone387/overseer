@@ -31,9 +31,6 @@ func validateRequiredFields(cfg *Config) []string {
 	if cfg.Server.Port == 0 {
 		errs = append(errs, "  - 缺少必填字段: server.port")
 	}
-	if cfg.Server.APIKey == "" {
-		errs = append(errs, "  - 缺少必填字段: server.api_key")
-	}
 	if cfg.Bark.ServerURL == "" {
 		errs = append(errs, "  - 缺少必填字段: bark.server_url")
 	}
@@ -51,11 +48,6 @@ func validateFieldConstraints(cfg *Config) []string {
 	// server.port: 1-65535
 	if cfg.Server.Port != 0 && (cfg.Server.Port < 1 || cfg.Server.Port > 65535) {
 		errs = append(errs, fmt.Sprintf("  - 字段 server.port 值 %d 超出有效范围 1-65535", cfg.Server.Port))
-	}
-
-	// server.api_key: length >= 16
-	if cfg.Server.APIKey != "" && len(cfg.Server.APIKey) < 16 {
-		errs = append(errs, fmt.Sprintf("  - 字段 server.api_key 长度为 %d，不满足最小长度要求 16", len(cfg.Server.APIKey)))
 	}
 
 	// bark.server_url: valid URL

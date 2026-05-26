@@ -5,16 +5,48 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 )
+
+const testSecret = "test-jwt-secret-key-for-testing"
 
 func init() {
 	gin.SetMode(gin.TestMode)
 }
 
-func setupRouter(apiKey string) *gin.Engine {
+func generateTestToken(userID, username string) string {
+	claims := JWTClaims{
+		UserID:   userID,
+		Username: username,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenStr, _ := token.SignedString([]byte(testSecret))
+	return tokenStr
+}
+
+func generateExpiredToken(userID, username string) string {
+	claims := JWTClaims{
+		UserID:   userID,
+		Username: username,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(-1 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now().Add(-2 * time.Hour)),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenStr, _ := token.SignedString([]byte(testSecret))
+	return tokenStr
+}
+
+func setupJWTRouter() *gin.Engine {
 	r := gin.New()
 
 	// Health endpoint - no auth
@@ -24,23 +56,21 @@ func setupRouter(apiKey string) *gin.Engine {
 
 	// Protected routes
 	protected := r.Group("/")
-	protected.Use(APIKeyAuth(apiKey))
+	protected.Use(JWTAuth(testSecret))
 	protected.GET("/api/test", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"code": 200, "message": "success"})
-	})
-	protected.POST("/webhook/github", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"code": 200, "message": "success"})
+		userID, _ := c.Get("user_id")
+		c.JSON(http.StatusOK, gin.H{"code": 200, "message": "success", "user_id": userID})
 	})
 
 	return r
 }
 
-func TestAPIKeyAuth_ValidKey(t *testing.T) {
-	apiKey := "test-api-key-1234567890"
-	router := setupRouter(apiKey)
+func TestJWTAuth_ValidBearerToken(t *testing.T) {
+	router := setupJWTRouter()
+	token := generateTestToken("user-123", "admin")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
-	req.Header.Set("X-API-Key", apiKey)
+	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 
 	router.ServeHTTP(w, req)
@@ -50,16 +80,32 @@ func TestAPIKeyAuth_ValidKey(t *testing.T) {
 	var resp map[string]interface{}
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	assert.NoError(t, err)
-	assert.Equal(t, float64(200), resp["code"])
 	assert.Equal(t, "success", resp["message"])
+	assert.Equal(t, "user-123", resp["user_id"])
 }
 
-func TestAPIKeyAuth_MissingKey(t *testing.T) {
-	apiKey := "test-api-key-1234567890"
-	router := setupRouter(apiKey)
+func TestJWTAuth_ValidCookie(t *testing.T) {
+	router := setupJWTRouter()
+	token := generateTestToken("user-456", "testuser")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
-	// No X-API-Key header
+	req.AddCookie(&http.Cookie{Name: "overseer_token", Value: token})
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &resp)
+	assert.NoError(t, err)
+	assert.Equal(t, "user-456", resp["user_id"])
+}
+
+func TestJWTAuth_MissingToken(t *testing.T) {
+	router := setupJWTRouter()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
 	w := httptest.NewRecorder()
 
 	router.ServeHTTP(w, req)
@@ -70,34 +116,60 @@ func TestAPIKeyAuth_MissingKey(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	assert.NoError(t, err)
 	assert.Equal(t, float64(401), resp["code"])
-	assert.Equal(t, "unauthorized: invalid or missing API key", resp["message"])
 }
 
-func TestAPIKeyAuth_InvalidKey(t *testing.T) {
-	apiKey := "test-api-key-1234567890"
-	router := setupRouter(apiKey)
+func TestJWTAuth_InvalidToken(t *testing.T) {
+	router := setupJWTRouter()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
-	req.Header.Set("X-API-Key", "wrong-key-value")
+	req.Header.Set("Authorization", "Bearer invalid-token-value")
 	w := httptest.NewRecorder()
 
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
-
-	var resp map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &resp)
-	assert.NoError(t, err)
-	assert.Equal(t, float64(401), resp["code"])
-	assert.Equal(t, "unauthorized: invalid or missing API key", resp["message"])
 }
 
-func TestAPIKeyAuth_HealthEndpointNoAuth(t *testing.T) {
-	apiKey := "test-api-key-1234567890"
-	router := setupRouter(apiKey)
+func TestJWTAuth_ExpiredToken(t *testing.T) {
+	router := setupJWTRouter()
+	token := generateExpiredToken("user-789", "expired")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestJWTAuth_WrongSecret(t *testing.T) {
+	// Generate token with different secret
+	claims := JWTClaims{
+		UserID:   "user-wrong",
+		Username: "wrong",
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenStr, _ := token.SignedString([]byte("different-secret"))
+
+	router := setupJWTRouter()
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+	req.Header.Set("Authorization", "Bearer "+tokenStr)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestJWTAuth_HealthEndpointNoAuth(t *testing.T) {
+	router := setupJWTRouter()
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
-	// No X-API-Key header
 	w := httptest.NewRecorder()
 
 	router.ServeHTTP(w, req)
@@ -107,41 +179,5 @@ func TestAPIKeyAuth_HealthEndpointNoAuth(t *testing.T) {
 	var resp map[string]interface{}
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	assert.NoError(t, err)
-	assert.Equal(t, float64(200), resp["code"])
 	assert.Equal(t, "ok", resp["message"])
-}
-
-func TestAPIKeyAuth_WebhookRequiresAuth(t *testing.T) {
-	apiKey := "test-api-key-1234567890"
-	router := setupRouter(apiKey)
-
-	// Without key
-	req := httptest.NewRequest(http.MethodPost, "/webhook/github", nil)
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
-
-	// With valid key
-	req = httptest.NewRequest(http.MethodPost, "/webhook/github", nil)
-	req.Header.Set("X-API-Key", apiKey)
-	w = httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestAPIKeyAuth_EmptyKeyConfig(t *testing.T) {
-	// When API key config is empty, all requests should be rejected
-	router := setupRouter("")
-
-	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
-	req.Header.Set("X-API-Key", "")
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }

@@ -14,8 +14,9 @@ type Config struct {
 
 // ServerConfig holds HTTP server settings.
 type ServerConfig struct {
-	Port   int    `yaml:"port"`
-	APIKey string `yaml:"api_key"`
+	Port      int    `yaml:"port"`
+	APIKey    string `yaml:"api_key"`    // deprecated: kept for backward compat during migration
+	JWTSecret string `yaml:"jwt_secret"` // auto-generated if empty
 }
 
 // BarkConfig holds Bark push service settings.

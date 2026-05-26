@@ -52,6 +52,20 @@ type Store interface {
 	ListChannels() ([]model.Channel, error)
 	GetChannelByName(name string) (*model.Channel, error)
 
+	// Auth operations
+	CreateUser(u *model.User) error
+	GetUserByUsername(username string) (*model.User, error)
+	GetUserCount() (int, error)
+	UpdateUserPassword(id string, passwordHash string) error
+
+	// API Key operations
+	CreateAPIKey(key *model.APIKey) error
+	ListAPIKeys(userID string) ([]model.APIKey, error)
+	DeleteAPIKey(id string) error
+	GetAPIKeyByHash(keyHash string) (*model.APIKey, error)
+	UpdateAPIKeyLastUsed(id string) error
+	ValidateAPIKey(rawKey string) (*model.APIKey, error)
+
 	// Lifecycle
 	Close() error
 	Migrate() error

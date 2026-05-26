@@ -45,6 +45,18 @@ func (m *mockStore) DeleteChannel(_ string) error                               
 func (m *mockStore) ListChannels() ([]model.Channel, error)                        { return nil, nil }
 func (m *mockStore) GetChannelByName(_ string) (*model.Channel, error)             { return nil, nil }
 
+// Auth stubs
+func (m *mockStore) CreateUser(_ *model.User) error                        { return nil }
+func (m *mockStore) GetUserByUsername(_ string) (*model.User, error)       { return nil, nil }
+func (m *mockStore) GetUserCount() (int, error)                            { return 0, nil }
+func (m *mockStore) UpdateUserPassword(_ string, _ string) error           { return nil }
+func (m *mockStore) CreateAPIKey(_ *model.APIKey) error                    { return nil }
+func (m *mockStore) ListAPIKeys(_ string) ([]model.APIKey, error)          { return nil, nil }
+func (m *mockStore) DeleteAPIKey(_ string) error                           { return nil }
+func (m *mockStore) GetAPIKeyByHash(_ string) (*model.APIKey, error)       { return nil, nil }
+func (m *mockStore) UpdateAPIKeyLastUsed(_ string) error                   { return nil }
+func (m *mockStore) ValidateAPIKey(_ string) (*model.APIKey, error)        { return nil, nil }
+
 func (m *mockStore) CreateReminder(r *model.Reminder) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

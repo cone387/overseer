@@ -671,6 +671,25 @@
   letter-spacing: 1px;
 }
 
+.settings-new-key-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  border-radius: 6px;
+}
+
+.settings-key-value {
+  font-family: monospace;
+  font-size: 0.8rem;
+  word-break: break-all;
+  flex: 1;
+  color: var(--color-text);
+}
+
 /* API Key Guard */
 .apikey-guard {
   display: flex;

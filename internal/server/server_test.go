@@ -9,21 +9,64 @@ import (
 	"time"
 
 	"github.com/overseer/overseer/internal/config"
+	"github.com/overseer/overseer/internal/model"
+	"github.com/overseer/overseer/internal/store"
 	"github.com/stretchr/testify/assert"
 )
+
+// testStore is a minimal mock store for server tests.
+type testStore struct{}
+
+func (s *testStore) SaveMessage(_ *model.Message) error                              { return nil }
+func (s *testStore) UpdateMessageStatus(_ string, _ model.PushStatus, _ string) error { return nil }
+func (s *testStore) QueryMessages(_ store.MessageFilter) (*model.PagedResult[model.Message], error) {
+	return nil, nil
+}
+func (s *testStore) GetChannelStats(_, _ time.Time) ([]model.ChannelStats, error) { return nil, nil }
+func (s *testStore) CreateReminder(_ *model.Reminder) error                        { return nil }
+func (s *testStore) UpdateReminder(_ *model.Reminder) error                        { return nil }
+func (s *testStore) CancelReminder(_ string) error                                 { return nil }
+func (s *testStore) ListReminders(_ store.ReminderFilter) ([]model.Reminder, error) {
+	return nil, nil
+}
+func (s *testStore) GetActiveReminders() ([]model.Reminder, error)  { return nil, nil }
+func (s *testStore) UpdateNextTrigger(_ string, _ time.Time) error  { return nil }
+func (s *testStore) CreateDevice(_ *model.Device) error             { return nil }
+func (s *testStore) UpdateDevice(_ *model.Device) error             { return nil }
+func (s *testStore) DeleteDevice(_ string) error                    { return nil }
+func (s *testStore) ListDevices() ([]model.Device, error)           { return nil, nil }
+func (s *testStore) GetDefaultDevice() (*model.Device, error)       { return nil, nil }
+func (s *testStore) SetDefaultDevice(_ string) error                { return nil }
+func (s *testStore) CreateChannel(_ *model.Channel) error           { return nil }
+func (s *testStore) UpdateChannel(_ *model.Channel) error           { return nil }
+func (s *testStore) DeleteChannel(_ string) error                   { return nil }
+func (s *testStore) ListChannels() ([]model.Channel, error)         { return nil, nil }
+func (s *testStore) GetChannelByName(_ string) (*model.Channel, error) { return nil, nil }
+func (s *testStore) CreateUser(_ *model.User) error                    { return nil }
+func (s *testStore) GetUserByUsername(_ string) (*model.User, error)   { return nil, nil }
+func (s *testStore) GetUserCount() (int, error)                        { return 0, nil }
+func (s *testStore) UpdateUserPassword(_ string, _ string) error       { return nil }
+func (s *testStore) CreateAPIKey(_ *model.APIKey) error                { return nil }
+func (s *testStore) ListAPIKeys(_ string) ([]model.APIKey, error)      { return nil, nil }
+func (s *testStore) DeleteAPIKey(_ string) error                       { return nil }
+func (s *testStore) GetAPIKeyByHash(_ string) (*model.APIKey, error)   { return nil, nil }
+func (s *testStore) UpdateAPIKeyLastUsed(_ string) error               { return nil }
+func (s *testStore) ValidateAPIKey(_ string) (*model.APIKey, error)    { return nil, nil }
+func (s *testStore) Close() error                                      { return nil }
+func (s *testStore) Migrate() error                                    { return nil }
 
 func testConfig() *config.Config {
 	return &config.Config{
 		Server: config.ServerConfig{
-			Port:   8080,
-			APIKey: "test-api-key-1234567890",
+			Port:      8080,
+			JWTSecret: "test-jwt-secret",
 		},
 	}
 }
 
 func TestNewServer(t *testing.T) {
 	cfg := testConfig()
-	s := NewServer(cfg)
+	s := NewServer(cfg, &testStore{})
 
 	assert.NotNil(t, s)
 	assert.NotNil(t, s.engine)
@@ -32,7 +75,7 @@ func TestNewServer(t *testing.T) {
 
 func TestServer_HealthEndpoint(t *testing.T) {
 	cfg := testConfig()
-	s := NewServer(cfg)
+	s := NewServer(cfg, &testStore{})
 	s.SetupRoutes()
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -51,10 +94,10 @@ func TestServer_HealthEndpoint(t *testing.T) {
 
 func TestServer_HealthEndpointNoAuthRequired(t *testing.T) {
 	cfg := testConfig()
-	s := NewServer(cfg)
+	s := NewServer(cfg, &testStore{})
 	s.SetupRoutes()
 
-	// No API key header - should still work for /health
+	// No auth - should still work for /health
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
 
@@ -65,7 +108,7 @@ func TestServer_HealthEndpointNoAuthRequired(t *testing.T) {
 
 func TestServer_Shutdown(t *testing.T) {
 	cfg := testConfig()
-	s := NewServer(cfg)
+	s := NewServer(cfg, &testStore{})
 	s.SetupRoutes()
 
 	// Shutdown without Start should not error
@@ -78,7 +121,7 @@ func TestServer_Shutdown(t *testing.T) {
 
 func TestServer_Engine(t *testing.T) {
 	cfg := testConfig()
-	s := NewServer(cfg)
+	s := NewServer(cfg, &testStore{})
 
 	assert.NotNil(t, s.Engine())
 	assert.Equal(t, s.engine, s.Engine())

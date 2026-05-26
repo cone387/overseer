@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/overseer/overseer/internal/config"
 	"github.com/overseer/overseer/internal/server/middleware"
+	"github.com/overseer/overseer/internal/store"
 )
 
 // Server wraps the Gin engine and HTTP server for Overseer.
@@ -15,10 +16,11 @@ type Server struct {
 	cfg    *config.Config
 	engine *gin.Engine
 	srv    *http.Server
+	store  store.Store
 }
 
-// NewServer creates a new Server with the given configuration.
-func NewServer(cfg *config.Config) *Server {
+// NewServer creates a new Server with the given configuration and store.
+func NewServer(cfg *config.Config, db store.Store) *Server {
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
 	engine.Use(gin.Recovery())
@@ -26,6 +28,7 @@ func NewServer(cfg *config.Config) *Server {
 	s := &Server{
 		cfg:    cfg,
 		engine: engine,
+		store:  db,
 	}
 	return s
 }
@@ -43,9 +46,15 @@ func (s *Server) SetupRoutes() {
 		})
 	})
 
+	// Determine JWT secret
+	jwtSecret := s.cfg.Server.JWTSecret
+	if jwtSecret == "" {
+		jwtSecret = "default-dev-secret"
+	}
+
 	// Apply auth middleware to all other routes
 	authGroup := s.engine.Group("/")
-	authGroup.Use(middleware.APIKeyAuth(s.cfg.Server.APIKey))
+	authGroup.Use(middleware.APIKeyOrJWTAuth(s.store, jwtSecret))
 
 	// API routes will be registered here by handlers
 	api := authGroup.Group("/api")

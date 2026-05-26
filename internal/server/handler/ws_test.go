@@ -9,13 +9,29 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
+	"github.com/overseer/overseer/internal/server/middleware"
 	"github.com/overseer/overseer/internal/ws"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-const testAPIKey = "test-api-key-minimum-16-chars"
+const testWSSecret = "test-jwt-secret-for-ws-tests"
+
+func generateWSTestToken() string {
+	claims := middleware.JWTClaims{
+		UserID:   "user-ws-test",
+		Username: "wsuser",
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenStr, _ := token.SignedString([]byte(testWSSecret))
+	return tokenStr
+}
 
 func setupWSRouter() (*gin.Engine, *ws.Hub) {
 	gin.SetMode(gin.TestMode)
@@ -23,7 +39,7 @@ func setupWSRouter() (*gin.Engine, *ws.Hub) {
 	hub := ws.NewHub(20)
 	go hub.Run()
 
-	h := NewWSHandler(hub, testAPIKey)
+	h := NewWSHandler(hub, testWSSecret)
 	h.Register(engine)
 	return engine, hub
 }
@@ -64,8 +80,8 @@ func TestWSHandler_ValidToken_UpgradesConnection(t *testing.T) {
 	server := httptest.NewServer(engine)
 	defer server.Close()
 
-	// Convert http URL to ws URL
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws?token=" + testAPIKey
+	validToken := generateWSTestToken()
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws?token=" + validToken
 
 	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	require.NoError(t, err)
@@ -83,7 +99,8 @@ func TestWSHandler_ValidToken_ReceivesBroadcast(t *testing.T) {
 	server := httptest.NewServer(engine)
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws?token=" + testAPIKey
+	validToken := generateWSTestToken()
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws?token=" + validToken
 
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	require.NoError(t, err)
@@ -115,7 +132,8 @@ func TestWSHandler_ClientDisconnect_UnregistersFromHub(t *testing.T) {
 	server := httptest.NewServer(engine)
 	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws?token=" + testAPIKey
+	validToken := generateWSTestToken()
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws?token=" + validToken
 
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	require.NoError(t, err)

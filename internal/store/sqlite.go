@@ -8,6 +8,7 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/overseer/overseer/internal/model"
 	"github.com/overseer/overseer/internal/store/migrations"
@@ -43,7 +44,7 @@ func NewSQLiteStore(dsn string) (*SQLiteStore, error) {
 }
 
 // allMigrations aggregates all migration SQL from the migrations package.
-var allMigrations = append(append(migrations.InitialMigration, migrations.DevicesMigration...), migrations.ChannelsMigration...)
+var allMigrations = append(append(append(migrations.InitialMigration, migrations.DevicesMigration...), migrations.ChannelsMigration...), migrations.AuthMigration...)
 
 // Migrate creates or upgrades the database schema.
 func (s *SQLiteStore) Migrate() error {
@@ -579,4 +580,159 @@ func (s *SQLiteStore) GetChannelByName(name string) (*model.Channel, error) {
 		ch.DeviceKeys = []string{}
 	}
 	return &ch, nil
+}
+
+// --- Auth operations ---
+
+func (s *SQLiteStore) CreateUser(u *model.User) error {
+	_, err := s.db.Exec(`
+		INSERT INTO users (id, username, password_hash, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)`,
+		u.ID, u.Username, u.PasswordHash, u.CreatedAt, u.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("create user: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) GetUserByUsername(username string) (*model.User, error) {
+	var u model.User
+	err := s.db.QueryRow(`
+		SELECT id, username, password_hash, created_at, updated_at
+		FROM users WHERE username = ?`, username).
+		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.CreatedAt, &u.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get user by username: %w", err)
+	}
+	return &u, nil
+}
+
+func (s *SQLiteStore) GetUserCount() (int, error) {
+	var count int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("get user count: %w", err)
+	}
+	return count, nil
+}
+
+func (s *SQLiteStore) UpdateUserPassword(id string, passwordHash string) error {
+	result, err := s.db.Exec(`
+		UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?`,
+		passwordHash, time.Now(), id,
+	)
+	if err != nil {
+		return fmt.Errorf("update user password: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("update user password: not found")
+	}
+	return nil
+}
+
+// --- API Key operations ---
+
+func (s *SQLiteStore) CreateAPIKey(key *model.APIKey) error {
+	_, err := s.db.Exec(`
+		INSERT INTO api_keys (id, name, key_hash, prefix, user_id, created_at, last_used)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		key.ID, key.Name, key.KeyHash, key.Prefix, key.UserID, key.CreatedAt, key.LastUsed,
+	)
+	if err != nil {
+		return fmt.Errorf("create api key: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) ListAPIKeys(userID string) ([]model.APIKey, error) {
+	rows, err := s.db.Query(`
+		SELECT id, name, prefix, user_id, created_at, last_used
+		FROM api_keys WHERE user_id = ? ORDER BY created_at DESC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list api keys: %w", err)
+	}
+	defer rows.Close()
+
+	var keys []model.APIKey
+	for rows.Next() {
+		var k model.APIKey
+		var lastUsed sql.NullTime
+		if err := rows.Scan(&k.ID, &k.Name, &k.Prefix, &k.UserID, &k.CreatedAt, &lastUsed); err != nil {
+			return nil, fmt.Errorf("scan api key: %w", err)
+		}
+		if lastUsed.Valid {
+			k.LastUsed = &lastUsed.Time
+		}
+		keys = append(keys, k)
+	}
+	return keys, rows.Err()
+}
+
+func (s *SQLiteStore) DeleteAPIKey(id string) error {
+	result, err := s.db.Exec(`DELETE FROM api_keys WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete api key: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("delete api key: not found")
+	}
+	return nil
+}
+
+func (s *SQLiteStore) GetAPIKeyByHash(keyHash string) (*model.APIKey, error) {
+	var k model.APIKey
+	var lastUsed sql.NullTime
+	err := s.db.QueryRow(`
+		SELECT id, name, key_hash, prefix, user_id, created_at, last_used
+		FROM api_keys WHERE key_hash = ?`, keyHash).
+		Scan(&k.ID, &k.Name, &k.KeyHash, &k.Prefix, &k.UserID, &k.CreatedAt, &lastUsed)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get api key by hash: %w", err)
+	}
+	if lastUsed.Valid {
+		k.LastUsed = &lastUsed.Time
+	}
+	return &k, nil
+}
+
+func (s *SQLiteStore) UpdateAPIKeyLastUsed(id string) error {
+	_, err := s.db.Exec(`UPDATE api_keys SET last_used = ? WHERE id = ?`, time.Now(), id)
+	if err != nil {
+		return fmt.Errorf("update api key last used: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) ValidateAPIKey(rawKey string) (*model.APIKey, error) {
+	rows, err := s.db.Query(`SELECT id, name, key_hash, prefix, user_id, created_at, last_used FROM api_keys`)
+	if err != nil {
+		return nil, fmt.Errorf("validate api key: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var k model.APIKey
+		var lastUsed sql.NullTime
+		if err := rows.Scan(&k.ID, &k.Name, &k.KeyHash, &k.Prefix, &k.UserID, &k.CreatedAt, &lastUsed); err != nil {
+			return nil, fmt.Errorf("scan api key: %w", err)
+		}
+		if lastUsed.Valid {
+			k.LastUsed = &lastUsed.Time
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(k.KeyHash), []byte(rawKey)); err == nil {
+			// Match found - update last_used
+			_ = s.UpdateAPIKeyLastUsed(k.ID)
+			return &k, nil
+		}
+	}
+	return nil, nil
 }
