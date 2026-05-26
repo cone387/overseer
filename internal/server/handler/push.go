@@ -24,6 +24,11 @@ type PushRequest struct {
 	Title   string            `json:"title"`
 	Body    string            `json:"body"`
 	Channel string            `json:"channel"`
+	Sound   string            `json:"sound"`
+	Icon    string            `json:"icon"`
+	Group   string            `json:"group"`
+	Level   string            `json:"level"`
+	URL     string            `json:"url"`
 	Extra   map[string]string `json:"extra"`
 }
 
@@ -66,6 +71,11 @@ func (h *PushHandler) HandlePush(c *gin.Context) {
 		Title:      req.Title,
 		Body:       req.Body,
 		Extra:      req.Extra,
+		Sound:      req.Sound,
+		Icon:       req.Icon,
+		Group:      req.Group,
+		Level:      req.Level,
+		URL:        req.URL,
 		Status:     model.StatusPending,
 		ReceivedAt: time.Now(),
 	}
@@ -117,6 +127,11 @@ func (h *PushHandler) HandleTestPush(c *gin.Context) {
 		Title:      req.Title,
 		Body:       req.Body,
 		Extra:      req.Extra,
+		Sound:      req.Sound,
+		Icon:       req.Icon,
+		Group:      req.Group,
+		Level:      req.Level,
+		URL:        req.URL,
 		Status:     model.StatusPending,
 		ReceivedAt: time.Now(),
 	}

@@ -149,6 +149,11 @@ export interface PushRequest {
   title: string
   body: string
   channel?: string
+  sound?: string
+  icon?: string
+  group?: string
+  level?: string
+  url?: string
   extra?: Record<string, string>
 }
 

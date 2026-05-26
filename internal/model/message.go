@@ -24,4 +24,11 @@ type Message struct {
 	RetryCount int               `json:"retry_count"`
 	ReceivedAt time.Time         `json:"received_at"`
 	PushedAt   *time.Time        `json:"pushed_at,omitempty"`
+
+	// Push parameter overrides (optional, override channel defaults)
+	Sound string `json:"sound,omitempty"`
+	Icon  string `json:"icon,omitempty"`
+	Group string `json:"group,omitempty"`
+	Level string `json:"level,omitempty"`
+	URL   string `json:"url,omitempty"`
 }

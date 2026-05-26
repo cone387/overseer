@@ -146,6 +146,11 @@ func (p *Pipeline) TestPushHandler(msg *model.Message) error {
 	pushReq := pusher.PushRequest{
 		Title: msg.Title,
 		Body:  msg.Body,
+		Sound: msg.Sound,
+		Icon:  msg.Icon,
+		Group: msg.Group,
+		Level: msg.Level,
+		URL:   msg.URL,
 	}
 
 	results := p.pusher.PushToChannel(context.Background(), pushReq, configChannelToChannel(channel), p.cfg.Bark.DeviceKey)
@@ -173,6 +178,11 @@ func (p *Pipeline) pushMessage(msg *model.Message, channel *config.Channel) erro
 	pushReq := pusher.PushRequest{
 		Title: msg.Title,
 		Body:  msg.Body,
+		Sound: msg.Sound,
+		Icon:  msg.Icon,
+		Group: msg.Group,
+		Level: msg.Level,
+		URL:   msg.URL,
 	}
 
 	results := p.pusher.PushToChannel(context.Background(), pushReq, *channel, p.cfg.Bark.DeviceKey)

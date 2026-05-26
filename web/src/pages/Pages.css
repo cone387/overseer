@@ -552,3 +552,30 @@
   color: var(--color-text-secondary);
   margin-top: 2px;
 }
+
+/* Push page advanced config */
+.form-divider {
+  border-top: 1px solid var(--color-border, #e5e7eb);
+  padding-top: 12px;
+  margin-top: 8px;
+}
+
+.btn--link {
+  background: none;
+  border: none;
+  color: var(--color-primary, #3b82f6);
+  cursor: pointer;
+  font-size: 0.875rem;
+  padding: 4px 0;
+}
+
+.btn--link:hover {
+  text-decoration: underline;
+}
+
+.form-hint {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #6b7280);
+  margin-top: 4px;
+}
