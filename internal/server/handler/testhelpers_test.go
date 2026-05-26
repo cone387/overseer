@@ -122,6 +122,37 @@ func (m *mockStore) SetDefaultDevice(id string) error {
 	return args.Error(0)
 }
 
+func (m *mockStore) CreateChannel(ch *model.Channel) error {
+	args := m.Called(ch)
+	return args.Error(0)
+}
+
+func (m *mockStore) UpdateChannel(ch *model.Channel) error {
+	args := m.Called(ch)
+	return args.Error(0)
+}
+
+func (m *mockStore) DeleteChannel(id string) error {
+	args := m.Called(id)
+	return args.Error(0)
+}
+
+func (m *mockStore) ListChannels() ([]model.Channel, error) {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]model.Channel), args.Error(1)
+}
+
+func (m *mockStore) GetChannelByName(name string) (*model.Channel, error) {
+	args := m.Called(name)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*model.Channel), args.Error(1)
+}
+
 // setupRouter creates a Gin engine with the webhook handler registered.
 // Used by webhook_test.go.
 func setupRouter(handler MessageHandler) *gin.Engine {

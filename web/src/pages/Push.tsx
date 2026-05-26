@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { sendPush, sendTestPush, PushRequest } from '../api'
+import { useState, useEffect } from 'react'
+import { sendPush, sendTestPush, PushRequest, fetchDevices, Device } from '../api'
 import './Pages.css'
 
 interface PushResultDisplay {
@@ -68,6 +68,17 @@ function Push() {
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState<PushResultDisplay | null>(null)
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [devices, setDevices] = useState<Device[]>([])
+  const [selectedDeviceKeys, setSelectedDeviceKeys] = useState<string[]>([])
+
+  useEffect(() => {
+    fetchDevices().then((res) => {
+      const devs = res.data || []
+      setDevices(devs)
+      const defaultKeys = devs.filter((d) => d.is_default).map((d) => d.device_key)
+      setSelectedDeviceKeys(defaultKeys)
+    }).catch(() => {})
+  }, [])
 
   function addExtra() {
     if (extraKey.trim()) {
@@ -95,6 +106,7 @@ function Push() {
     if (level) req.level = level
     if (url) req.url = url
     if (Object.keys(extras).length > 0) req.extra = extras
+    if (selectedDeviceKeys.length > 0) req.device_keys = selectedDeviceKeys
     return req
   }
 
@@ -138,6 +150,8 @@ function Push() {
     setExtraKey('')
     setExtraValue('')
     setResult(null)
+    const defaultKeys = devices.filter((d) => d.is_default).map((d) => d.device_key)
+    setSelectedDeviceKeys(defaultKeys)
   }
 
   return (
@@ -316,6 +330,32 @@ function Push() {
                 </div>
               </div>
             </>
+          )}
+
+          {devices.length > 0 && (
+            <div className="form-group">
+              <label className="form-label">目标设备</label>
+              <div className="device-checkbox-list">
+                {devices.map((d) => (
+                  <label key={d.id} className="form-label--checkbox">
+                    <input
+                      type="checkbox"
+                      checked={selectedDeviceKeys.includes(d.device_key)}
+                      onChange={() => {
+                        setSelectedDeviceKeys((prev) =>
+                          prev.includes(d.device_key)
+                            ? prev.filter((k) => k !== d.device_key)
+                            : [...prev, d.device_key]
+                        )
+                      }}
+                    />
+                    <span>{d.name}</span>
+                    {d.is_default && <span className="device-badge">默认</span>}
+                  </label>
+                ))}
+              </div>
+              <small className="form-hint">选择推送的目标设备，不选择则推送到所有设备</small>
+            </div>
           )}
 
           <div className="form-actions">

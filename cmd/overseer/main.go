@@ -302,6 +302,10 @@ func main() {
 	deviceHandler := handler.NewDeviceHandler(db)
 	deviceHandler.RegisterRoutes(api)
 
+	// Channel API
+	channelHandler := handler.NewChannelHandler(db)
+	channelHandler.RegisterRoutes(api)
+
 	// Serve embedded frontend static files with SPA fallback
 	distFS, err := fs.Sub(overseer.WebDist, "web/dist")
 	if err != nil {

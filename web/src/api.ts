@@ -154,6 +154,7 @@ export interface PushRequest {
   group?: string
   level?: string
   url?: string
+  device_keys?: string[]
   extra?: Record<string, string>
 }
 
@@ -219,5 +220,43 @@ export function deleteDevice(id: string): Promise<ApiResponse<null>> {
 export function setDefaultDevice(id: string): Promise<ApiResponse<null>> {
   return request<null>(`/api/devices/${id}/default`, {
     method: 'POST',
+  })
+}
+
+
+// Channels
+export interface Channel {
+  id: string
+  name: string
+  sound: string
+  group: string
+  icon: string
+  level: string
+  device_keys: string[]
+  created_at: string
+  updated_at: string
+}
+
+export function fetchChannels(): Promise<ApiResponse<Channel[]>> {
+  return request<Channel[]>('/api/channels')
+}
+
+export function createChannel(data: Partial<Channel>): Promise<ApiResponse<Channel>> {
+  return request<Channel>('/api/channels', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export function updateChannel(id: string, data: Partial<Channel>): Promise<ApiResponse<null>> {
+  return request<null>(`/api/channels/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export function deleteChannel(id: string): Promise<ApiResponse<null>> {
+  return request<null>(`/api/channels/${id}`, {
+    method: 'DELETE',
   })
 }

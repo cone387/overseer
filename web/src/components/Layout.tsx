@@ -7,6 +7,11 @@ const navItems = [
   { path: '/reminders', label: '提醒管理', icon: '⏰' },
   { path: '/push', label: '发送推送', icon: '🚀' },
   { path: '/devices', label: '设备管理', icon: '📱' },
+  { path: '/channels', label: '频道管理', icon: '🔔' },
+]
+
+const bottomNavItems = [
+  { path: '/settings', label: '设置', icon: '⚙️' },
 ]
 
 function Layout() {
@@ -23,6 +28,19 @@ function Layout() {
               key={item.path}
               to={item.path}
               end={item.path === '/'}
+              className={({ isActive }) =>
+                `nav-item ${isActive ? 'nav-item--active' : ''}`
+              }
+            >
+              <span className="nav-icon">{item.icon}</span>
+              <span className="nav-label">{item.label}</span>
+            </NavLink>
+          ))}
+          <div className="nav-spacer" />
+          {bottomNavItems.map((item) => (
+            <NavLink
+              key={item.path}
+              to={item.path}
               className={({ isActive }) =>
                 `nav-item ${isActive ? 'nav-item--active' : ''}`
               }

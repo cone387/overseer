@@ -45,6 +45,13 @@ type Store interface {
 	GetDefaultDevice() (*model.Device, error)
 	SetDefaultDevice(id string) error
 
+	// Channel operations
+	CreateChannel(ch *model.Channel) error
+	UpdateChannel(ch *model.Channel) error
+	DeleteChannel(id string) error
+	ListChannels() ([]model.Channel, error)
+	GetChannelByName(name string) (*model.Channel, error)
+
 	// Lifecycle
 	Close() error
 	Migrate() error

@@ -39,6 +39,11 @@ func (m *mockStore) DeleteDevice(_ string) error                                
 func (m *mockStore) ListDevices() ([]model.Device, error)                          { return nil, nil }
 func (m *mockStore) GetDefaultDevice() (*model.Device, error)                      { return nil, nil }
 func (m *mockStore) SetDefaultDevice(_ string) error                               { return nil }
+func (m *mockStore) CreateChannel(_ *model.Channel) error                          { return nil }
+func (m *mockStore) UpdateChannel(_ *model.Channel) error                          { return nil }
+func (m *mockStore) DeleteChannel(_ string) error                                  { return nil }
+func (m *mockStore) ListChannels() ([]model.Channel, error)                        { return nil, nil }
+func (m *mockStore) GetChannelByName(_ string) (*model.Channel, error)             { return nil, nil }
 
 func (m *mockStore) CreateReminder(r *model.Reminder) error {
 	m.mu.Lock()

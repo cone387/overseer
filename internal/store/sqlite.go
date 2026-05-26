@@ -43,7 +43,7 @@ func NewSQLiteStore(dsn string) (*SQLiteStore, error) {
 }
 
 // allMigrations aggregates all migration SQL from the migrations package.
-var allMigrations = append(migrations.InitialMigration, migrations.DevicesMigration...)
+var allMigrations = append(append(migrations.InitialMigration, migrations.DevicesMigration...), migrations.ChannelsMigration...)
 
 // Migrate creates or upgrades the database schema.
 func (s *SQLiteStore) Migrate() error {
@@ -486,4 +486,97 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// --- Channel operations ---
+
+func (s *SQLiteStore) CreateChannel(ch *model.Channel) error {
+	deviceKeysJSON, _ := json.Marshal(ch.DeviceKeys)
+	_, err := s.db.Exec(`
+		INSERT INTO channels (id, name, sound, grp, icon, level, device_keys, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		ch.ID, ch.Name, ch.Sound, ch.Group, ch.Icon, ch.Level, string(deviceKeysJSON), ch.CreatedAt, ch.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("create channel: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) UpdateChannel(ch *model.Channel) error {
+	deviceKeysJSON, _ := json.Marshal(ch.DeviceKeys)
+	result, err := s.db.Exec(`
+		UPDATE channels SET name = ?, sound = ?, grp = ?, icon = ?, level = ?, device_keys = ?, updated_at = ?
+		WHERE id = ?`,
+		ch.Name, ch.Sound, ch.Group, ch.Icon, ch.Level, string(deviceKeysJSON), time.Now(), ch.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("update channel: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("update channel: not found")
+	}
+	return nil
+}
+
+func (s *SQLiteStore) DeleteChannel(id string) error {
+	result, err := s.db.Exec(`DELETE FROM channels WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete channel: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("delete channel: not found")
+	}
+	return nil
+}
+
+func (s *SQLiteStore) ListChannels() ([]model.Channel, error) {
+	rows, err := s.db.Query(`
+		SELECT id, name, sound, grp, icon, level, device_keys, created_at, updated_at
+		FROM channels ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("list channels: %w", err)
+	}
+	defer rows.Close()
+
+	var channels []model.Channel
+	for rows.Next() {
+		var ch model.Channel
+		var deviceKeysJSON string
+		if err := rows.Scan(&ch.ID, &ch.Name, &ch.Sound, &ch.Group, &ch.Icon, &ch.Level, &deviceKeysJSON, &ch.CreatedAt, &ch.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan channel: %w", err)
+		}
+		if deviceKeysJSON != "" {
+			_ = json.Unmarshal([]byte(deviceKeysJSON), &ch.DeviceKeys)
+		}
+		if ch.DeviceKeys == nil {
+			ch.DeviceKeys = []string{}
+		}
+		channels = append(channels, ch)
+	}
+	return channels, rows.Err()
+}
+
+func (s *SQLiteStore) GetChannelByName(name string) (*model.Channel, error) {
+	var ch model.Channel
+	var deviceKeysJSON string
+	err := s.db.QueryRow(`
+		SELECT id, name, sound, grp, icon, level, device_keys, created_at, updated_at
+		FROM channels WHERE name = ?`, name).
+		Scan(&ch.ID, &ch.Name, &ch.Sound, &ch.Group, &ch.Icon, &ch.Level, &deviceKeysJSON, &ch.CreatedAt, &ch.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get channel by name: %w", err)
+	}
+	if deviceKeysJSON != "" {
+		_ = json.Unmarshal([]byte(deviceKeysJSON), &ch.DeviceKeys)
+	}
+	if ch.DeviceKeys == nil {
+		ch.DeviceKeys = []string{}
+	}
+	return &ch, nil
 }
