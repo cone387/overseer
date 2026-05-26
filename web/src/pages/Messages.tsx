@@ -12,8 +12,14 @@ function Messages() {
 
   const [channelFilter, setChannelFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
+  const [fromDate, setFromDate] = useState(() => {
+    const d = new Date()
+    d.setDate(d.getDate() - 7)
+    return d.toISOString().slice(0, 16)
+  })
+  const [toDate, setToDate] = useState(() => {
+    return new Date().toISOString().slice(0, 16)
+  })
 
   useEffect(() => {
     loadMessages()
@@ -26,11 +32,11 @@ function Messages() {
       const filter: MessageFilter = {
         page,
         page_size: pageSize,
+        from: new Date(fromDate).toISOString(),
+        to: new Date(toDate).toISOString(),
       }
       if (channelFilter) filter.channel = channelFilter
       if (statusFilter) filter.status = statusFilter
-      if (fromDate) filter.from = new Date(fromDate).toISOString()
-      if (toDate) filter.to = new Date(toDate).toISOString()
 
       const res = await fetchMessages(filter)
       const data = res.data

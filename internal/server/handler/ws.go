@@ -40,10 +40,17 @@ func (h *WSHandler) Register(engine *gin.Engine) {
 }
 
 // HandleWS upgrades the HTTP connection to a WebSocket connection.
-// Authentication is performed via the "token" query parameter (JWT).
+// Authentication is performed via the "token" query parameter (JWT) or the overseer_token cookie.
 func (h *WSHandler) HandleWS(c *gin.Context) {
-	token := c.Query("token")
-	if token == "" {
+	tokenStr := c.Query("token")
+	if tokenStr == "" {
+		// Try cookie
+		if cookie, err := c.Cookie("overseer_token"); err == nil && cookie != "" {
+			tokenStr = cookie
+		}
+	}
+
+	if tokenStr == "" {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 			"code":    401,
 			"message": "unauthorized: missing token",
@@ -53,7 +60,7 @@ func (h *WSHandler) HandleWS(c *gin.Context) {
 
 	// Validate JWT token
 	claims := &middleware.JWTClaims{}
-	parsed, err := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (interface{}, error) {
+	parsed, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, jwt.ErrSignatureInvalid
 		}
