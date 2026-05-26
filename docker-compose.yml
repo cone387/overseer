@@ -7,10 +7,8 @@ services:
       - "9721:9721"
     volumes:
       - ./config.yaml:/etc/overseer/config.yaml:ro
-      - overseer-data:/data
+      - ./data:/data
     environment:
       - OVERSEER_CONFIG_PATH=/etc/overseer/config.yaml
+      - TZ=Asia/Shanghai
     restart: unless-stopped
-
-volumes:
-  overseer-data:

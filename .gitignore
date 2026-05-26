@@ -25,3 +25,7 @@ web/dist/
 
 # Config (contains secrets)
 config.yaml
+
+
+# Database (local volume)
+data/

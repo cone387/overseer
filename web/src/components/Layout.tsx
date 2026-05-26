@@ -6,8 +6,8 @@ const navItems = [
   { path: '/messages', label: '推送历史', icon: '📨' },
   { path: '/reminders', label: '提醒管理', icon: '⏰' },
   { path: '/push', label: '发送推送', icon: '🚀' },
-  { path: '/devices', label: '设备管理', icon: '📱' },
   { path: '/channels', label: '频道管理', icon: '🔔' },
+  { path: '/devices', label: '设备管理', icon: '📱' },
 ]
 
 const bottomNavItems = [

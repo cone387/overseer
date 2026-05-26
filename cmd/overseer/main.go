@@ -101,13 +101,16 @@ func main() {
 	getDefaultDeviceKey := func() string {
 		device, err := db.GetDefaultDevice()
 		if err == nil && device != nil {
+			log.Printf("[overseer] push: using default device %q key=%q", device.Name, device.DeviceKey)
 			return device.DeviceKey
 		}
 		// Fallback: get first device from DB
 		devices, err := db.ListDevices()
 		if err == nil && len(devices) > 0 {
+			log.Printf("[overseer] push: using first device %q key=%q", devices[0].Name, devices[0].DeviceKey)
 			return devices[0].DeviceKey
 		}
+		log.Println("[overseer] push: WARNING no devices configured in database")
 		return ""
 	}
 
@@ -175,9 +178,11 @@ func main() {
 
 	// Define the message handler pipeline
 	messageHandler := func(msg *model.Message) error {
+		log.Printf("[overseer] messageHandler: processing message %s title=%q", msg.ID, msg.Title)
 		// Route message
 		ch, tmplName := msgRouter.Route(msg)
 		msg.Channel = ch.Name
+		log.Printf("[overseer] messageHandler: routed to channel=%q level=%q", ch.Name, ch.Level)
 
 		// Render template
 		if tmplName != "" {
@@ -192,13 +197,14 @@ func main() {
 
 		// Aggregation check
 		result := agg.Process(msg, ch.Level)
+		log.Printf("[overseer] messageHandler: aggregation result=%d for message %s", result.Action, msg.ID)
 		switch result.Action {
 		case aggregator.ActionDedupe:
-			// Duplicate suppressed, update status
+			log.Printf("[overseer] messageHandler: message %s deduplicated, skipping push", msg.ID)
 			_ = db.UpdateMessageStatus(msg.ID, model.StatusSuccess, "deduplicated")
 			return nil
 		case aggregator.ActionRateLimit:
-			// Rate limited, message queued
+			log.Printf("[overseer] messageHandler: message %s rate-limited", msg.ID)
 			return nil
 		case aggregator.ActionBatch:
 			// Batched - push summary

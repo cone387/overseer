@@ -63,11 +63,21 @@ function Messages() {
     }
   }
 
+  function getDefaultFrom() {
+    const d = new Date()
+    d.setDate(d.getDate() - 7)
+    return d.toISOString().slice(0, 16)
+  }
+
+  function getDefaultTo() {
+    return new Date().toISOString().slice(0, 16)
+  }
+
   function handleReset() {
     setChannelFilter('')
     setStatusFilter('')
-    setFromDate('')
-    setToDate('')
+    setFromDate(getDefaultFrom())
+    setToDate(getDefaultTo())
     setPage(1)
   }
 
