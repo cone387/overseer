@@ -4,6 +4,7 @@ package config
 type Config struct {
 	Server     ServerConfig     `yaml:"server"`
 	Bark       BarkConfig       `yaml:"bark"`
+	LLM        LLMConfig        `yaml:"llm"`
 	Channels   []Channel        `yaml:"channels"`
 	Rules      []Rule           `yaml:"rules"`
 	DND        []DNDPeriod      `yaml:"dnd"`
@@ -17,6 +18,13 @@ type ServerConfig struct {
 	Port      int    `yaml:"port"`
 	APIKey    string `yaml:"api_key"`    // deprecated: kept for backward compat during migration
 	JWTSecret string `yaml:"jwt_secret"` // auto-generated if empty
+}
+
+// LLMConfig holds LLM API settings for natural language schedule parsing.
+type LLMConfig struct {
+	BaseURL string `yaml:"base_url"` // OpenAI-compatible API base URL
+	APIKey  string `yaml:"api_key"`  // API key
+	Model   string `yaml:"model"`    // model name, e.g. "gpt-4o-mini"
 }
 
 // BarkConfig holds Bark push service settings.

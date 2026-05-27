@@ -354,6 +354,29 @@ export function setDefaultDevice(id: string): Promise<ApiResponse<null>> {
   })
 }
 
+// ─── Schedule Parsing (LLM) ──────────────────────────────────────────────────
+
+export interface ScheduleConfig {
+  type: string
+  config: Record<string, unknown>
+  timezone?: string
+  start_time?: string
+  end_time?: string
+  raw_input?: string
+}
+
+export interface ScheduleParseResult {
+  title: string
+  schedule: ScheduleConfig
+}
+
+export function parseSchedule(input: string, timezone?: string): Promise<ApiResponse<ScheduleParseResult>> {
+  return request<ScheduleParseResult>('/api/schedule/parse', {
+    method: 'POST',
+    body: JSON.stringify({ input, timezone: timezone || 'Asia/Shanghai' }),
+  })
+}
+
 // ─── Channels ────────────────────────────────────────────────────────────────
 
 export interface Channel {

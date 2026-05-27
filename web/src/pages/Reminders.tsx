@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { fetchReminders, createReminder, updateReminder, cancelReminder, fetchChannels, fetchDevices, Reminder, CreateReminderRequest, Channel, Device } from '../api'
+import { fetchReminders, createReminder, updateReminder, cancelReminder, fetchChannels, fetchDevices, parseSchedule, Reminder, CreateReminderRequest, Channel, Device, ScheduleParseResult } from '../api'
 import './Pages.css'
 
 type TabStatus = '' | 'active' | 'completed' | 'cancelled'
@@ -25,6 +25,13 @@ function Reminders() {
   const [formDeviceKeys, setFormDeviceKeys] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState('')
+
+  // Natural language input
+  const [nlInput, setNlInput] = useState('')
+  const [nlParsing, setNlParsing] = useState(false)
+  const [nlResult, setNlResult] = useState<ScheduleParseResult | null>(null)
+  const [nlError, setNlError] = useState('')
+  const [useNlMode, setUseNlMode] = useState(false)
 
   useEffect(() => { loadReminders() }, [activeTab])
   useEffect(() => {
@@ -141,6 +148,50 @@ function Reminders() {
     setFormDeviceKeys([])
     setFormError('')
     setEditingId(null)
+    setNlInput('')
+    setNlResult(null)
+    setNlError('')
+  }
+
+  async function handleNlParse() {
+    if (!nlInput.trim()) return
+    setNlParsing(true)
+    setNlError('')
+    setNlResult(null)
+    try {
+      const res = await parseSchedule(nlInput.trim())
+      const result = res.data
+      setNlResult(result)
+      // Auto-fill the form with parsed result
+      if (result.title) setFormTitle(result.title)
+      if (result.schedule) {
+        const sc = result.schedule
+        setFormRepeat(sc.type)
+        // Convert schedule config to form fields
+        if (sc.type === 'once' && sc.config.datetime) {
+          const dt = new Date(sc.config.datetime as string)
+          setFormTriggerAt(dt.toISOString().slice(0, 16))
+        } else if (sc.config.time) {
+          // For daily/weekly/workday/weekend, set trigger time to today + that time
+          const timeStr = sc.config.time as string
+          const [h, m] = timeStr.split(':')
+          const now = new Date()
+          now.setHours(parseInt(h), parseInt(m), 0, 0)
+          if (now < new Date()) now.setDate(now.getDate() + 1)
+          setFormTriggerAt(now.toISOString().slice(0, 16))
+        }
+        if (sc.type === 'weekly' && sc.config.days) {
+          setFormRepeatRule(JSON.stringify(sc.config.days))
+        }
+        if (sc.type === 'crontab' && sc.config.expression) {
+          setFormRepeatRule(sc.config.expression as string)
+        }
+      }
+    } catch (err) {
+      setNlError(err instanceof Error ? err.message : '解析失败')
+    } finally {
+      setNlParsing(false)
+    }
   }
 
   function formatTime(iso: string): string {
@@ -169,6 +220,48 @@ function Reminders() {
       {showForm && (
         <div className="form-card">
           <h3 className="form-title">{editingId ? '编辑提醒' : '创建提醒'}</h3>
+
+          {/* Natural language input toggle */}
+          {!editingId && (
+            <div style={{ marginBottom: '1rem' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                <button type="button" className={`btn btn--sm ${!useNlMode ? 'btn--primary' : 'btn--secondary'}`} onClick={() => setUseNlMode(false)}>手动配置</button>
+                <button type="button" className={`btn btn--sm ${useNlMode ? 'btn--primary' : 'btn--secondary'}`} onClick={() => setUseNlMode(true)}>✨ 自然语言</button>
+              </div>
+              {useNlMode && (
+                <div className="form-group">
+                  <label className="form-label">用自然语言描述你的提醒</label>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <input
+                      type="text"
+                      className="text-input"
+                      value={nlInput}
+                      onChange={(e) => setNlInput(e.target.value)}
+                      placeholder="如：每天早上9点提醒我开会、下周一下午3点提醒我交报告"
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleNlParse() } }}
+                      style={{ flex: 1 }}
+                    />
+                    <button type="button" className="btn btn--primary" onClick={handleNlParse} disabled={nlParsing || !nlInput.trim()}>
+                      {nlParsing ? '解析中...' : '解析'}
+                    </button>
+                  </div>
+                  {nlError && <div className="error-banner" style={{ marginTop: '0.5rem' }}>{nlError}</div>}
+                  {nlResult && (
+                    <div className="result-card result-card--success" style={{ marginTop: '0.5rem' }}>
+                      <div className="result-content">
+                        <div className="result-message">✓ 解析成功</div>
+                        <div style={{ fontSize: '0.85rem', color: '#374151', marginTop: '0.25rem' }}>
+                          标题: {nlResult.title} | 类型: {nlResult.schedule.type} | 配置: {JSON.stringify(nlResult.schedule.config)}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  <small className="form-hint">输入自然语言描述，AI 会自动解析为定时配置并填充下方表单</small>
+                </div>
+              )}
+            </div>
+          )}
+
           {formError && <div className="error-banner">{formError}</div>}
           <form onSubmit={handleSubmit} className="form-grid">
             <div className="form-group">
@@ -199,7 +292,12 @@ function Reminders() {
                   <option value="once">一次性</option>
                   <option value="daily">每天</option>
                   <option value="weekly">每周</option>
-                  <option value="cron">Cron 表达式</option>
+                  <option value="workday">工作日</option>
+                  <option value="weekend">周末</option>
+                  <option value="monthly">每月</option>
+                  <option value="yearly">每年</option>
+                  <option value="interval">固定间隔</option>
+                  <option value="crontab">Cron 表达式</option>
                 </select>
               </div>
               {(formRepeat === 'weekly' || formRepeat === 'cron') && (

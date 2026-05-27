@@ -20,6 +20,7 @@ import (
 	"github.com/overseer/overseer/internal/aggregator"
 	"github.com/overseer/overseer/internal/config"
 	"github.com/overseer/overseer/internal/escalator"
+	"github.com/overseer/overseer/internal/llm"
 	"github.com/overseer/overseer/internal/model"
 	"github.com/overseer/overseer/internal/pusher"
 	"github.com/overseer/overseer/internal/router"
@@ -96,6 +97,18 @@ func main() {
 
 	// Initialize Bark Pusher
 	barkPusher := pusher.NewBarkPusher(cfg.Bark)
+
+	// Initialize LLM Client
+	llmClient := llm.NewClient(llm.Config{
+		BaseURL: cfg.LLM.BaseURL,
+		APIKey:  cfg.LLM.APIKey,
+		Model:   cfg.LLM.Model,
+	})
+	if llmClient.IsConfigured() {
+		log.Println("[overseer] LLM client configured")
+	} else {
+		log.Println("[overseer] LLM not configured (natural language parsing disabled)")
+	}
 
 	// Initialize WebSocket Hub
 	wsHub := ws.NewHub(20)
@@ -353,6 +366,10 @@ func main() {
 	// Channel API
 	channelHandler := handler.NewChannelHandler(db)
 	channelHandler.RegisterRoutes(api)
+
+	// Schedule parse API (LLM)
+	scheduleHandler := handler.NewScheduleHandler(llmClient)
+	scheduleHandler.RegisterRoutes(api)
 
 	// Serve embedded frontend static files with SPA fallback
 	distFS, err := fs.Sub(overseer.WebDist, "web/dist")
