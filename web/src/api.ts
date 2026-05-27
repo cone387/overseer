@@ -374,8 +374,12 @@ export function saveLLMSettings(data: { base_url?: string; api_key?: string; mod
   })
 }
 
-export function fetchLLMModels(): Promise<ApiResponse<string[]>> {
-  return request<string[]>('/api/settings/llm/models')
+export function fetchLLMModels(baseUrl?: string, apiKey?: string): Promise<ApiResponse<string[]>> {
+  const params = new URLSearchParams()
+  if (baseUrl) params.set('base_url', baseUrl)
+  if (apiKey) params.set('api_key', apiKey)
+  const qs = params.toString()
+  return request<string[]>(`/api/settings/llm/models${qs ? '?' + qs : ''}`)
 }
 
 export interface ScheduleConfig {

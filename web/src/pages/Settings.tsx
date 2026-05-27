@@ -54,19 +54,17 @@ function Settings() {
       setLlmBaseUrl(res.data.base_url || '')
       setLlmModel(res.data.model || '')
       setLlmModelSearch(res.data.model || '')
-      // Auto-load models if configured
-      if (res.data.configured) {
-        loadModels()
-      }
     } catch { /* ignore */ }
   }
 
   async function loadModels() {
     setLlmModelsLoading(true)
     try {
-      const res = await fetchLLMModels()
+      const res = await fetchLLMModels(llmBaseUrl || undefined, llmApiKey || undefined)
       setLlmModels(res.data || [])
-    } catch { /* ignore */ }
+    } catch (err) {
+      setLlmResult({ ok: false, message: err instanceof Error ? err.message : '获取模型列表失败' })
+    }
     finally { setLlmModelsLoading(false) }
   }
 
@@ -213,33 +211,47 @@ function Settings() {
             <input id="llm-api-key" type="password" className="text-input" value={llmApiKey} onChange={(e) => setLlmApiKey(e.target.value)} placeholder={llmSettings?.configured ? '留空保持不变，输入新值则覆盖' : '输入 API Key'} />
           </div>
           <div className="form-group">
-            <label className="form-label" htmlFor="llm-model">模型</label>
-            <div style={{ position: 'relative' }}>
-              <input
-                id="llm-model"
-                type="text"
-                className="text-input"
-                value={llmModelSearch}
-                onChange={(e) => { setLlmModelSearch(e.target.value); setLlmModel(e.target.value) }}
-                placeholder={llmModelsLoading ? '加载模型列表中...' : 'gpt-4o-mini'}
-                list="llm-model-list"
-              />
-              <datalist id="llm-model-list">
-                {llmModels
-                  .filter((m) => !llmModelSearch || m.toLowerCase().includes(llmModelSearch.toLowerCase()))
-                  .slice(0, 50)
-                  .map((m) => (<option key={m} value={m} />))
-                }
-              </datalist>
-            </div>
-            <small className="form-hint">
-              {llmModels.length > 0
-                ? `已加载 ${llmModels.length} 个可用模型，输入搜索`
-                : '保存 API 配置后自动获取可用模型列表'}
-              {llmSettings?.configured && !llmModelsLoading && llmModels.length === 0 && (
-                <button type="button" className="btn btn--link" style={{ marginLeft: '0.5rem' }} onClick={loadModels}>刷新模型列表</button>
+            <label className="form-label">模型</label>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
+              {llmModels.length > 0 ? (
+                <div style={{ flex: 1 }}>
+                  <input
+                    type="text"
+                    className="text-input"
+                    value={llmModelSearch}
+                    onChange={(e) => { setLlmModelSearch(e.target.value); setLlmModel(e.target.value) }}
+                    placeholder="输入搜索模型..."
+                    list="llm-model-list"
+                  />
+                  <datalist id="llm-model-list">
+                    {llmModels
+                      .filter((m) => !llmModelSearch || m.toLowerCase().includes(llmModelSearch.toLowerCase()))
+                      .slice(0, 50)
+                      .map((m) => (<option key={m} value={m} />))
+                    }
+                  </datalist>
+                  <small className="form-hint">共 {llmModels.length} 个可用模型，输入关键词搜索</small>
+                </div>
+              ) : (
+                <input
+                  type="text"
+                  className="text-input"
+                  value={llmModelSearch}
+                  onChange={(e) => { setLlmModelSearch(e.target.value); setLlmModel(e.target.value) }}
+                  placeholder="gpt-4o-mini"
+                  style={{ flex: 1 }}
+                />
               )}
-            </small>
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={loadModels}
+                disabled={llmModelsLoading || (!llmApiKey && !llmSettings?.configured)}
+              >
+                {llmModelsLoading ? '加载中...' : '获取模型'}
+              </button>
+            </div>
+            {llmModels.length === 0 && <small className="form-hint">填写 API 地址和 Key 后，点击"获取模型"加载可用模型列表</small>}
           </div>
           <div className="form-actions">
             <button className="btn btn--primary" onClick={handleSaveLLM} disabled={llmSaving}>

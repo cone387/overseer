@@ -107,18 +107,36 @@ func (h *SettingsHandler) SaveLLM(c *gin.Context) {
 	})
 }
 
-// ListModels fetches available models from the configured LLM API.
+// ListModels fetches available models from the LLM API.
+// Accepts optional query params base_url and api_key to test before saving.
 func (h *SettingsHandler) ListModels(c *gin.Context) {
-	if h.llmClient == nil || *h.llmClient == nil || !(*h.llmClient).IsConfigured() {
-		c.JSON(http.StatusOK, gin.H{
-			"code":    200,
-			"message": "success",
-			"data":    []string{},
+	baseURL := c.Query("base_url")
+	apiKey := c.Query("api_key")
+
+	// If not provided in query, use saved settings
+	if baseURL == "" {
+		baseURL, _ = h.store.GetSetting("llm.base_url")
+	}
+	if apiKey == "" {
+		apiKey, _ = h.store.GetSetting("llm.api_key")
+	}
+
+	if apiKey == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "请先填写 API Key",
+			"data":    nil,
 		})
 		return
 	}
 
-	models, err := (*h.llmClient).ListModels(c.Request.Context())
+	// Create a temporary client with the provided credentials
+	tempClient := llm.NewClient(llm.Config{
+		BaseURL: baseURL,
+		APIKey:  apiKey,
+	})
+
+	models, err := tempClient.ListModels(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
