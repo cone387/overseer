@@ -5,6 +5,12 @@ import './Pages.css'
 
 type TabStatus = '' | 'active' | 'completed' | 'cancelled'
 
+// Convert a Date to local datetime-local input format (YYYY-MM-DDTHH:MM)
+function toLocalDatetimeStr(d: Date): string {
+  const pad = (n: number) => n.toString().padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 function Reminders() {
   const [reminders, setReminders] = useState<Reminder[]>([])
   const [channels, setChannels] = useState<Channel[]>([])
@@ -169,15 +175,15 @@ function Reminders() {
         // Convert schedule config to form fields
         if (sc.type === 'once' && sc.config.datetime) {
           const dt = new Date(sc.config.datetime as string)
-          setFormTriggerAt(dt.toISOString().slice(0, 16))
+          setFormTriggerAt(toLocalDatetimeStr(dt))
         } else if (sc.config.time) {
-          // For daily/weekly/workday/weekend, set trigger time to today + that time
+          // For daily/weekly/workday/weekend, set next trigger time
           const timeStr = sc.config.time as string
           const [h, m] = timeStr.split(':')
-          const now = new Date()
-          now.setHours(parseInt(h), parseInt(m), 0, 0)
-          if (now < new Date()) now.setDate(now.getDate() + 1)
-          setFormTriggerAt(now.toISOString().slice(0, 16))
+          const next = new Date()
+          next.setHours(parseInt(h), parseInt(m), 0, 0)
+          if (next <= new Date()) next.setDate(next.getDate() + 1)
+          setFormTriggerAt(toLocalDatetimeStr(next))
         }
         if (sc.type === 'weekly' && sc.config.days) {
           setFormRepeatRule(JSON.stringify(sc.config.days))
@@ -260,7 +266,7 @@ function Reminders() {
             </div>
             <div className="form-row">
               <div className="form-group">
-                <label className="form-label" htmlFor="reminder-trigger">触发时间 *</label>
+                <label className="form-label" htmlFor="reminder-trigger">下一次触发时间 *</label>
                 <input id="reminder-trigger" type="datetime-local" className="text-input" value={formTriggerAt} onChange={(e) => setFormTriggerAt(e.target.value)} required />
               </div>
               <div className="form-group">
@@ -358,7 +364,7 @@ function Reminders() {
               {r.body && <p className="reminder-body">{r.body}</p>}
               <div className="reminder-meta">
                 <span>频道: {r.channel}</span>
-                <span>触发: {formatTime(r.trigger_at)}</span>
+                <span>下次触发: {formatTime(r.trigger_at)}</span>
                 <span>重复: {r.repeat_type === 'once' ? '一次性' : r.repeat_type === 'daily' ? '每天' : r.repeat_type === 'weekly' ? '每周' : r.repeat_type}</span>
                 {r.next_trigger && <span>下次: {formatTime(r.next_trigger)}</span>}
                 <Link to={`/messages?channel=${encodeURIComponent(r.channel)}`} className="reminder-push-count">
