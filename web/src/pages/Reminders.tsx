@@ -31,7 +31,6 @@ function Reminders() {
   const [nlParsing, setNlParsing] = useState(false)
   const [nlResult, setNlResult] = useState<ScheduleParseResult | null>(null)
   const [nlError, setNlError] = useState('')
-  const [useNlMode, setUseNlMode] = useState(false)
 
   useEffect(() => { loadReminders() }, [activeTab])
   useEffect(() => {
@@ -221,44 +220,31 @@ function Reminders() {
         <div className="form-card">
           <h3 className="form-title">{editingId ? '编辑提醒' : '创建提醒'}</h3>
 
-          {/* Natural language input toggle */}
+          {/* Natural language input - always visible at top */}
           {!editingId && (
-            <div style={{ marginBottom: '1rem' }}>
-              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                <button type="button" className={`btn btn--sm ${!useNlMode ? 'btn--primary' : 'btn--secondary'}`} onClick={() => setUseNlMode(false)}>手动配置</button>
-                <button type="button" className={`btn btn--sm ${useNlMode ? 'btn--primary' : 'btn--secondary'}`} onClick={() => setUseNlMode(true)}>✨ 自然语言</button>
+            <div className="form-group" style={{ marginBottom: '1.25rem', paddingBottom: '1rem', borderBottom: '1px solid #e5e7eb' }}>
+              <label className="form-label">✨ 智能输入</label>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <input
+                  type="text"
+                  className="text-input"
+                  value={nlInput}
+                  onChange={(e) => setNlInput(e.target.value)}
+                  placeholder="用自然语言描述，如：每天早上9点提醒我开会"
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleNlParse() } }}
+                  style={{ flex: 1 }}
+                />
+                <button type="button" className="btn btn--primary" onClick={handleNlParse} disabled={nlParsing || !nlInput.trim()}>
+                  {nlParsing ? '解析中...' : '解析'}
+                </button>
               </div>
-              {useNlMode && (
-                <div className="form-group">
-                  <label className="form-label">用自然语言描述你的提醒</label>
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <input
-                      type="text"
-                      className="text-input"
-                      value={nlInput}
-                      onChange={(e) => setNlInput(e.target.value)}
-                      placeholder="如：每天早上9点提醒我开会、下周一下午3点提醒我交报告"
-                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleNlParse() } }}
-                      style={{ flex: 1 }}
-                    />
-                    <button type="button" className="btn btn--primary" onClick={handleNlParse} disabled={nlParsing || !nlInput.trim()}>
-                      {nlParsing ? '解析中...' : '解析'}
-                    </button>
-                  </div>
-                  {nlError && <div className="error-banner" style={{ marginTop: '0.5rem' }}>{nlError}</div>}
-                  {nlResult && (
-                    <div className="result-card result-card--success" style={{ marginTop: '0.5rem' }}>
-                      <div className="result-content">
-                        <div className="result-message">✓ 解析成功</div>
-                        <div style={{ fontSize: '0.85rem', color: '#374151', marginTop: '0.25rem' }}>
-                          标题: {nlResult.title} | 类型: {nlResult.schedule.type} | 配置: {JSON.stringify(nlResult.schedule.config)}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  <small className="form-hint">输入自然语言描述，AI 会自动解析为定时配置并填充下方表单</small>
-                </div>
+              {nlError && <small style={{ color: '#dc2626', marginTop: '4px', display: 'block' }}>{nlError}</small>}
+              {nlResult && (
+                <small style={{ color: '#059669', marginTop: '4px', display: 'block' }}>
+                  ✓ 已解析：{nlResult.schedule.type} — {JSON.stringify(nlResult.schedule.config)}
+                </small>
               )}
+              <small className="form-hint">输入后按回车自动解析并填充下方表单，你也可以直接手动填写</small>
             </div>
           )}
 
