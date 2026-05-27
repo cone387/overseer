@@ -5,6 +5,7 @@ import {
   logout,
   getLLMSettings,
   saveLLMSettings,
+  fetchLLMModels,
   ApiError,
   type AuthUser,
   type LLMSettings,
@@ -19,6 +20,9 @@ function Settings() {
   const [llmBaseUrl, setLlmBaseUrl] = useState('')
   const [llmApiKey, setLlmApiKey] = useState('')
   const [llmModel, setLlmModel] = useState('')
+  const [llmModels, setLlmModels] = useState<string[]>([])
+  const [llmModelSearch, setLlmModelSearch] = useState('')
+  const [llmModelsLoading, setLlmModelsLoading] = useState(false)
   const [llmSaving, setLlmSaving] = useState(false)
   const [llmResult, setLlmResult] = useState<{ ok: boolean; message: string } | null>(null)
 
@@ -49,7 +53,21 @@ function Settings() {
       setLlmSettings(res.data)
       setLlmBaseUrl(res.data.base_url || '')
       setLlmModel(res.data.model || '')
+      setLlmModelSearch(res.data.model || '')
+      // Auto-load models if configured
+      if (res.data.configured) {
+        loadModels()
+      }
     } catch { /* ignore */ }
+  }
+
+  async function loadModels() {
+    setLlmModelsLoading(true)
+    try {
+      const res = await fetchLLMModels()
+      setLlmModels(res.data || [])
+    } catch { /* ignore */ }
+    finally { setLlmModelsLoading(false) }
   }
 
   async function handleSaveLLM() {
@@ -196,8 +214,32 @@ function Settings() {
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="llm-model">模型</label>
-            <input id="llm-model" type="text" className="text-input" value={llmModel} onChange={(e) => setLlmModel(e.target.value)} placeholder="gpt-4o-mini" />
-            <small className="form-hint">如：gpt-4o-mini、deepseek-chat、qwen-turbo</small>
+            <div style={{ position: 'relative' }}>
+              <input
+                id="llm-model"
+                type="text"
+                className="text-input"
+                value={llmModelSearch}
+                onChange={(e) => { setLlmModelSearch(e.target.value); setLlmModel(e.target.value) }}
+                placeholder={llmModelsLoading ? '加载模型列表中...' : 'gpt-4o-mini'}
+                list="llm-model-list"
+              />
+              <datalist id="llm-model-list">
+                {llmModels
+                  .filter((m) => !llmModelSearch || m.toLowerCase().includes(llmModelSearch.toLowerCase()))
+                  .slice(0, 50)
+                  .map((m) => (<option key={m} value={m} />))
+                }
+              </datalist>
+            </div>
+            <small className="form-hint">
+              {llmModels.length > 0
+                ? `已加载 ${llmModels.length} 个可用模型，输入搜索`
+                : '保存 API 配置后自动获取可用模型列表'}
+              {llmSettings?.configured && !llmModelsLoading && llmModels.length === 0 && (
+                <button type="button" className="btn btn--link" style={{ marginLeft: '0.5rem' }} onClick={loadModels}>刷新模型列表</button>
+              )}
+            </small>
           </div>
           <div className="form-actions">
             <button className="btn btn--primary" onClick={handleSaveLLM} disabled={llmSaving}>

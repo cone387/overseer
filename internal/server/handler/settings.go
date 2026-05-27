@@ -23,6 +23,7 @@ func NewSettingsHandler(s store.Store, llmClient **llm.Client) *SettingsHandler 
 func (h *SettingsHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/settings/llm", h.GetLLM)
 	rg.POST("/settings/llm", h.SaveLLM)
+	rg.GET("/settings/llm/models", h.ListModels)
 }
 
 type llmSettingsResponse struct {
@@ -103,5 +104,33 @@ func (h *SettingsHandler) SaveLLM(c *gin.Context) {
 		"code":    200,
 		"message": "LLM 配置已保存",
 		"data":    nil,
+	})
+}
+
+// ListModels fetches available models from the configured LLM API.
+func (h *SettingsHandler) ListModels(c *gin.Context) {
+	if h.llmClient == nil || *h.llmClient == nil || !(*h.llmClient).IsConfigured() {
+		c.JSON(http.StatusOK, gin.H{
+			"code":    200,
+			"message": "success",
+			"data":    []string{},
+		})
+		return
+	}
+
+	models, err := (*h.llmClient).ListModels(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "获取模型列表失败: " + err.Error(),
+			"data":    nil,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    200,
+		"message": "success",
+		"data":    models,
 	})
 }

@@ -120,3 +120,54 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage) (string, erro
 
 	return chatResp.Choices[0].Message.Content, nil
 }
+
+// ModelInfo represents a model from the /models endpoint.
+type ModelInfo struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	OwnedBy string `json:"owned_by"`
+}
+
+// ModelsResponse is the response from GET /models.
+type ModelsResponse struct {
+	Data  []ModelInfo `json:"data"`
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
+}
+
+// ListModels fetches available models from the API.
+func (c *Client) ListModels(ctx context.Context) ([]string, error) {
+	url := c.baseURL + "/models"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	var modelsResp ModelsResponse
+	if err := json.Unmarshal(body, &modelsResp); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	if modelsResp.Error != nil {
+		return nil, fmt.Errorf("API error: %s", modelsResp.Error.Message)
+	}
+
+	models := make([]string, 0, len(modelsResp.Data))
+	for _, m := range modelsResp.Data {
+		models = append(models, m.ID)
+	}
+	return models, nil
+}
