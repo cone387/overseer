@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	overseer "github.com/overseer/overseer"
 	"github.com/overseer/overseer/internal/aggregator"
 	"github.com/overseer/overseer/internal/config"
@@ -68,6 +69,9 @@ func main() {
 		log.Fatalf("[overseer] failed to run migrations: %v", err)
 	}
 	log.Println("[overseer] database initialized")
+
+	// Seed default channels if none exist
+	seedDefaultChannels(db)
 
 	// Initialize Router
 	msgRouter, err := router.NewRouter(cfg.Rules, cfg.Channels)
@@ -419,6 +423,36 @@ func main() {
 	log.Println("[overseer] database closed")
 
 	log.Println("[overseer] shutdown complete")
+}
+
+// seedDefaultChannels creates initial channels if the database has none.
+func seedDefaultChannels(db *store.SQLiteStore) {
+	channels, err := db.ListChannels()
+	if err != nil || len(channels) > 0 {
+		return
+	}
+
+	log.Println("[overseer] seeding default channels...")
+
+	seeds := []model.Channel{
+		{Name: "default", Sound: "", Group: "默认", Level: "active"},
+		{Name: "urgent", Sound: "alarm.caf", Group: "紧急", Level: "critical"},
+		{Name: "info", Sound: "chime.caf", Group: "信息", Level: "active"},
+		{Name: "success", Sound: "paymentsuccess.caf", Group: "成功", Level: "active"},
+		{Name: "monitor", Sound: "electronic.caf", Group: "监控", Level: "timeSensitive"},
+	}
+
+	now := time.Now()
+	for _, ch := range seeds {
+		ch.ID = uuid.New().String()
+		ch.DeviceKeys = []string{}
+		ch.CreatedAt = now
+		ch.UpdatedAt = now
+		if err := db.CreateChannel(&ch); err != nil {
+			log.Printf("[overseer] failed to seed channel %s: %v", ch.Name, err)
+		}
+	}
+	log.Printf("[overseer] seeded %d default channels", len(seeds))
 }
 
 // pushError is a simple error type for push failures.

@@ -214,6 +214,17 @@ func (h *ChannelHandler) Update(c *gin.Context) {
 func (h *ChannelHandler) Delete(c *gin.Context) {
 	id := c.Param("id")
 
+	// Prevent deleting the default channel
+	ch, err := h.store.GetChannelByName("default")
+	if err == nil && ch != nil && ch.ID == id {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "默认频道不能删除",
+			"data":    nil,
+		})
+		return
+	}
+
 	if err := h.store.DeleteChannel(id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,

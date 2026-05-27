@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { fetchChannels, createChannel, updateChannel, deleteChannel, fetchDevices, Channel, Device } from '../api'
+import { fetchChannels, createChannel, updateChannel, deleteChannel, Channel } from '../api'
 import './Pages.css'
 
 const LEVEL_OPTIONS = [
@@ -13,16 +13,15 @@ const SOUND_PRESETS = [
   { value: '', label: '默认声音' },
   { value: 'alarm.caf', label: '🚨 alarm - 警报' },
   { value: 'bell.caf', label: '🔔 bell - 铃声' },
-  { value: 'calypso.caf', label: '🎵 calypso - 卡利普索' },
+  { value: 'calypso.caf', label: '🎵 calypso' },
   { value: 'chime.caf', label: '🎐 chime - 风铃' },
-  { value: 'electronic.caf', label: '⚡ electronic - 电子' },
+  { value: 'electronic.caf', label: '⚡ electronic' },
   { value: 'fanfare.caf', label: '🎺 fanfare - 号角' },
   { value: 'glass.caf', label: '🥂 glass - 玻璃' },
-  { value: 'healthnotification.caf', label: '❤️ health - 健康' },
+  { value: 'healthnotification.caf', label: '❤️ health' },
   { value: 'minuet.caf', label: '🎼 minuet - 小步舞曲' },
-  { value: 'newmail.caf', label: '📬 newmail - 新邮件' },
-  { value: 'newsflash.caf', label: '📰 newsflash - 新闻快讯' },
-  { value: 'paymentsuccess.caf', label: '💰 paymentsuccess - 支付成功' },
+  { value: 'newsflash.caf', label: '📰 newsflash' },
+  { value: 'paymentsuccess.caf', label: '💰 paymentsuccess' },
   { value: 'shake.caf', label: '📳 shake - 震动' },
   { value: 'silence.caf', label: '🔇 silence - 静音' },
   { value: 'update.caf', label: '🔄 update - 更新' },
@@ -34,14 +33,12 @@ interface ChannelForm {
   group: string
   icon: string
   level: string
-  device_keys: string[]
 }
 
-const emptyForm: ChannelForm = { name: '', sound: '', group: '', icon: '', level: 'active', device_keys: [] }
+const emptyForm: ChannelForm = { name: '', sound: '', group: '', icon: '', level: 'active' }
 
 function Channels() {
   const [channels, setChannels] = useState<Channel[]>([])
-  const [devices, setDevices] = useState<Device[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showForm, setShowForm] = useState(false)
@@ -56,9 +53,8 @@ function Channels() {
     setLoading(true)
     setError('')
     try {
-      const [chRes, devRes] = await Promise.all([fetchChannels(), fetchDevices()])
-      setChannels(chRes.data || [])
-      setDevices(devRes.data || [])
+      const res = await fetchChannels()
+      setChannels(res.data || [])
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载失败')
     } finally {
@@ -74,7 +70,6 @@ function Channels() {
       group: ch.group || '',
       icon: ch.icon || '',
       level: ch.level || 'active',
-      device_keys: ch.device_keys || [],
     })
     setShowForm(true)
     setFormError('')
@@ -99,7 +94,6 @@ function Channels() {
         group: form.group,
         icon: form.icon,
         level: form.level,
-        device_keys: form.device_keys,
       }
       if (editingId) {
         await updateChannel(editingId, data)
@@ -116,6 +110,10 @@ function Channels() {
   }
 
   async function handleDelete(id: string, name: string) {
+    if (name === 'default') {
+      setError('默认频道不能删除')
+      return
+    }
     if (!confirm(`确定要删除频道「${name}」吗？`)) return
     try {
       await deleteChannel(id)
@@ -125,13 +123,15 @@ function Channels() {
     }
   }
 
-  function toggleDeviceKey(key: string) {
-    setForm((prev) => ({
-      ...prev,
-      device_keys: prev.device_keys.includes(key)
-        ? prev.device_keys.filter((k) => k !== key)
-        : [...prev.device_keys, key],
-    }))
+  function getLevelLabel(level: string): string {
+    const opt = LEVEL_OPTIONS.find((l) => l.value === level)
+    return opt ? opt.label : level
+  }
+
+  function getSoundLabel(sound: string): string {
+    if (!sound) return '默认'
+    const opt = SOUND_PRESETS.find((s) => s.value === sound)
+    return opt ? opt.label : sound
   }
 
   return (
@@ -139,7 +139,7 @@ function Channels() {
       <div className="page-header">
         <div>
           <h2 className="page-title">频道管理</h2>
-          <p className="page-description">管理推送频道，每个频道绑定独特的声音和优先级</p>
+          <p className="page-description">管理推送频道，每个频道绑定独特的声音和优先级，实现"听声辨事"</p>
         </div>
         <button className="btn btn--primary" onClick={() => { if (showForm && !editingId) { cancelForm() } else { cancelForm(); setShowForm(true) } }}>
           {showForm && !editingId ? '取消' : '+ 新建频道'}
@@ -156,7 +156,7 @@ function Channels() {
             <div className="form-row">
               <div className="form-group">
                 <label className="form-label" htmlFor="ch-name">频道名称 *</label>
-                <input id="ch-name" type="text" className="text-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="如：urgent、daily" required />
+                <input id="ch-name" type="text" className="text-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="如：urgent、daily" required disabled={editingId !== null && form.name === 'default'} />
               </div>
               <div className="form-group">
                 <label className="form-label" htmlFor="ch-group">分组</label>
@@ -179,23 +179,8 @@ function Channels() {
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor="ch-icon">图标 URL</label>
-              <input id="ch-icon" type="url" className="text-input" value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} placeholder="https://example.com/icon.png" />
+              <input id="ch-icon" type="url" className="text-input" value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} placeholder="https://example.com/icon.png（可选）" />
             </div>
-            {devices.length > 0 && (
-              <div className="form-group">
-                <label className="form-label">目标设备</label>
-                <div className="device-checkbox-list">
-                  {devices.map((d) => (
-                    <label key={d.id} className="form-label--checkbox">
-                      <input type="checkbox" checked={form.device_keys.includes(d.device_key)} onChange={() => toggleDeviceKey(d.device_key)} />
-                      <span>{d.name}</span>
-                      {d.is_default && <span className="device-badge">默认</span>}
-                    </label>
-                  ))}
-                </div>
-                <small className="form-hint">不选择则推送到默认设备</small>
-              </div>
-            )}
             <div className="form-actions">
               <button type="submit" className="btn btn--primary" disabled={submitting || !form.name.trim()}>
                 {submitting ? '提交中...' : editingId ? '保存修改' : '创建频道'}
@@ -216,19 +201,23 @@ function Channels() {
       ) : (
         <div className="channel-list">
           {channels.map((ch) => (
-            <div key={ch.id} className="channel-card">
+            <div key={ch.id} className={`channel-card ${ch.name === 'default' ? 'channel-card--default' : ''}`}>
               <div className="channel-card-header">
-                <div className="channel-card-name">{ch.name}</div>
+                <div className="channel-card-name">
+                  {ch.name}
+                  {ch.name === 'default' && <span className="device-badge">默认</span>}
+                </div>
                 <div className="channel-card-actions">
                   <button className="btn btn--secondary btn--sm" onClick={() => startEdit(ch)}>编辑</button>
-                  <button className="btn btn--danger btn--sm" onClick={() => handleDelete(ch.id, ch.name)}>删除</button>
+                  {ch.name !== 'default' && (
+                    <button className="btn btn--danger btn--sm" onClick={() => handleDelete(ch.id, ch.name)}>删除</button>
+                  )}
                 </div>
               </div>
               <div className="channel-card-meta">
-                {ch.sound && <span>🔊 {ch.sound}</span>}
-                {ch.level && <span>📶 {ch.level}</span>}
+                <span>🔊 {getSoundLabel(ch.sound)}</span>
+                <span>📶 {getLevelLabel(ch.level)}</span>
                 {ch.group && <span>📁 {ch.group}</span>}
-                {ch.device_keys && ch.device_keys.length > 0 && <span>📱 {ch.device_keys.length} 台设备</span>}
               </div>
             </div>
           ))}
