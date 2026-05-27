@@ -98,12 +98,15 @@ func main() {
 	// Initialize Bark Pusher
 	barkPusher := pusher.NewBarkPusher(cfg.Bark)
 
-	// Initialize LLM Client
-	llmClient := llm.NewClient(llm.Config{
-		BaseURL: cfg.LLM.BaseURL,
-		APIKey:  cfg.LLM.APIKey,
-		Model:   cfg.LLM.Model,
-	})
+	// Initialize LLM Client (from DB settings first, fallback to config)
+	var llmClient *llm.Client
+	if dbBaseURL, _ := db.GetSetting("llm.base_url"); dbBaseURL != "" {
+		dbAPIKey, _ := db.GetSetting("llm.api_key")
+		dbModel, _ := db.GetSetting("llm.model")
+		llmClient = llm.NewClient(llm.Config{BaseURL: dbBaseURL, APIKey: dbAPIKey, Model: dbModel})
+	} else {
+		llmClient = llm.NewClient(llm.Config{BaseURL: cfg.LLM.BaseURL, APIKey: cfg.LLM.APIKey, Model: cfg.LLM.Model})
+	}
 	if llmClient.IsConfigured() {
 		log.Println("[overseer] LLM client configured")
 	} else {
@@ -368,8 +371,12 @@ func main() {
 	channelHandler.RegisterRoutes(api)
 
 	// Schedule parse API (LLM)
-	scheduleHandler := handler.NewScheduleHandler(llmClient)
+	scheduleHandler := handler.NewScheduleHandler(&llmClient)
 	scheduleHandler.RegisterRoutes(api)
+
+	// Settings API
+	settingsHandler := handler.NewSettingsHandler(db, &llmClient)
+	settingsHandler.RegisterRoutes(api)
 
 	// Serve embedded frontend static files with SPA fallback
 	distFS, err := fs.Sub(overseer.WebDist, "web/dist")

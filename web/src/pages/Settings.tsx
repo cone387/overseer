@@ -3,13 +3,24 @@ import {
   getMe,
   changePassword,
   logout,
+  getLLMSettings,
+  saveLLMSettings,
   ApiError,
   type AuthUser,
+  type LLMSettings,
 } from '../api'
 import './Pages.css'
 
 function Settings() {
   const [user, setUser] = useState<AuthUser | null>(null)
+
+  // LLM settings state
+  const [llmSettings, setLlmSettings] = useState<LLMSettings | null>(null)
+  const [llmBaseUrl, setLlmBaseUrl] = useState('')
+  const [llmApiKey, setLlmApiKey] = useState('')
+  const [llmModel, setLlmModel] = useState('')
+  const [llmSaving, setLlmSaving] = useState(false)
+  const [llmResult, setLlmResult] = useState<{ ok: boolean; message: string } | null>(null)
 
   // Change password state
   const [oldPassword, setOldPassword] = useState('')
@@ -20,6 +31,7 @@ function Settings() {
 
   useEffect(() => {
     loadUser()
+    loadLLMSettings()
   }, [])
 
   async function loadUser() {
@@ -28,6 +40,34 @@ function Settings() {
       setUser(me)
     } catch {
       // ignore
+    }
+  }
+
+  async function loadLLMSettings() {
+    try {
+      const res = await getLLMSettings()
+      setLlmSettings(res.data)
+      setLlmBaseUrl(res.data.base_url || '')
+      setLlmModel(res.data.model || '')
+    } catch { /* ignore */ }
+  }
+
+  async function handleSaveLLM() {
+    setLlmSaving(true)
+    setLlmResult(null)
+    try {
+      await saveLLMSettings({
+        base_url: llmBaseUrl,
+        api_key: llmApiKey || undefined,
+        model: llmModel,
+      })
+      setLlmResult({ ok: true, message: 'LLM 配置已保存' })
+      setLlmApiKey('')
+      loadLLMSettings()
+    } catch (err) {
+      setLlmResult({ ok: false, message: err instanceof ApiError ? err.message : '保存失败' })
+    } finally {
+      setLlmSaving(false)
     }
   }
 
@@ -136,6 +176,39 @@ function Settings() {
             <div className="result-content">
               <div className="result-message">{pwdResult.message}</div>
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* LLM Configuration */}
+      <div className="form-card">
+        <h3 className="form-title">AI 智能解析配置</h3>
+        <p className="form-hint" style={{ marginBottom: '1rem' }}>配置 OpenAI 兼容的 LLM API，用于自然语言解析定时提醒。支持 OpenAI、DeepSeek、通义千问等。</p>
+        <div className="form-grid">
+          <div className="form-group">
+            <label className="form-label" htmlFor="llm-base-url">API 地址</label>
+            <input id="llm-base-url" type="url" className="text-input" value={llmBaseUrl} onChange={(e) => setLlmBaseUrl(e.target.value)} placeholder="https://api.openai.com/v1" />
+            <small className="form-hint">留空默认使用 OpenAI 官方地址</small>
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="llm-api-key">API Key {llmSettings?.configured && <span style={{ color: '#059669' }}>（已配置）</span>}</label>
+            <input id="llm-api-key" type="password" className="text-input" value={llmApiKey} onChange={(e) => setLlmApiKey(e.target.value)} placeholder={llmSettings?.configured ? '留空保持不变，输入新值则覆盖' : '输入 API Key'} />
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="llm-model">模型</label>
+            <input id="llm-model" type="text" className="text-input" value={llmModel} onChange={(e) => setLlmModel(e.target.value)} placeholder="gpt-4o-mini" />
+            <small className="form-hint">如：gpt-4o-mini、deepseek-chat、qwen-turbo</small>
+          </div>
+          <div className="form-actions">
+            <button className="btn btn--primary" onClick={handleSaveLLM} disabled={llmSaving}>
+              {llmSaving ? '保存中...' : '保存配置'}
+            </button>
+          </div>
+        </div>
+        {llmResult && (
+          <div className={`result-card ${llmResult.ok ? 'result-card--success' : 'result-card--error'}`} style={{ marginTop: '0.75rem' }}>
+            <div className="result-icon">{llmResult.ok ? '✓' : '✗'}</div>
+            <div className="result-content"><div className="result-message">{llmResult.message}</div></div>
           </div>
         )}
       </div>

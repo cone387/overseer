@@ -356,6 +356,24 @@ export function setDefaultDevice(id: string): Promise<ApiResponse<null>> {
 
 // ─── Schedule Parsing (LLM) ──────────────────────────────────────────────────
 
+export interface LLMSettings {
+  base_url: string
+  api_key: string
+  model: string
+  configured: boolean
+}
+
+export function getLLMSettings(): Promise<ApiResponse<LLMSettings>> {
+  return request<LLMSettings>('/api/settings/llm')
+}
+
+export function saveLLMSettings(data: { base_url?: string; api_key?: string; model?: string }): Promise<ApiResponse<null>> {
+  return request<null>('/api/settings/llm', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
 export interface ScheduleConfig {
   type: string
   config: Record<string, unknown>

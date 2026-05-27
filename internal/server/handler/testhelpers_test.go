@@ -153,6 +153,24 @@ func (m *mockStore) GetChannelByName(name string) (*model.Channel, error) {
 	return args.Get(0).(*model.Channel), args.Error(1)
 }
 
+func (m *mockStore) GetSetting(key string) (string, error) {
+	args := m.Called(key)
+	return args.String(0), args.Error(1)
+}
+
+func (m *mockStore) SetSetting(key string, value string) error {
+	args := m.Called(key, value)
+	return args.Error(0)
+}
+
+func (m *mockStore) GetSettings(prefix string) (map[string]string, error) {
+	args := m.Called(prefix)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]string), args.Error(1)
+}
+
 // --- Auth mock methods ---
 
 func (m *mockStore) CreateUser(u *model.User) error {

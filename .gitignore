@@ -29,3 +29,8 @@ config.yaml
 
 # Database (local volume)
 data/
+
+# Local database
+overseer.db
+overseer.db-shm
+overseer.db-wal

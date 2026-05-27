@@ -9,11 +9,11 @@ import (
 
 // ScheduleHandler handles schedule parsing endpoints.
 type ScheduleHandler struct {
-	llmClient *llm.Client
+	llmClient **llm.Client
 }
 
 // NewScheduleHandler creates a new ScheduleHandler.
-func NewScheduleHandler(client *llm.Client) *ScheduleHandler {
+func NewScheduleHandler(client **llm.Client) *ScheduleHandler {
 	return &ScheduleHandler{llmClient: client}
 }
 
@@ -29,10 +29,10 @@ type parseRequest struct {
 
 // Parse handles POST /api/schedule/parse - parses natural language into a ScheduleConfig.
 func (h *ScheduleHandler) Parse(c *gin.Context) {
-	if h.llmClient == nil || !h.llmClient.IsConfigured() {
+	if h.llmClient == nil || *h.llmClient == nil || !(*h.llmClient).IsConfigured() {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"code":    503,
-			"message": "LLM 未配置，请在 config.yaml 中设置 llm.api_key",
+			"message": "LLM 未配置，请在设置页面配置 LLM API",
 			"data":    nil,
 		})
 		return
@@ -48,7 +48,7 @@ func (h *ScheduleHandler) Parse(c *gin.Context) {
 		return
 	}
 
-	result, err := llm.ParseSchedule(c.Request.Context(), h.llmClient, req.Input, req.Timezone)
+	result, err := llm.ParseSchedule(c.Request.Context(), *h.llmClient, req.Input, req.Timezone)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,

@@ -44,7 +44,7 @@ func NewSQLiteStore(dsn string) (*SQLiteStore, error) {
 }
 
 // allMigrations aggregates all migration SQL from the migrations package.
-var allMigrations = append(append(append(migrations.InitialMigration, migrations.DevicesMigration...), migrations.ChannelsMigration...), migrations.AuthMigration...)
+var allMigrations = append(append(append(append(migrations.InitialMigration, migrations.DevicesMigration...), migrations.ChannelsMigration...), migrations.AuthMigration...), migrations.SettingsMigration...)
 
 // Migrate creates or upgrades the database schema.
 func (s *SQLiteStore) Migrate() error {
@@ -735,4 +735,44 @@ func (s *SQLiteStore) ValidateAPIKey(rawKey string) (*model.APIKey, error) {
 		}
 	}
 	return nil, nil
+}
+
+// --- Settings operations ---
+
+func (s *SQLiteStore) GetSetting(key string) (string, error) {
+	var value string
+	err := s.db.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&value)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get setting: %w", err)
+	}
+	return value, nil
+}
+
+func (s *SQLiteStore) SetSetting(key string, value string) error {
+	_, err := s.db.Exec(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?`, key, value, value)
+	if err != nil {
+		return fmt.Errorf("set setting: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) GetSettings(prefix string) (map[string]string, error) {
+	rows, err := s.db.Query(`SELECT key, value FROM settings WHERE key LIKE ?`, prefix+"%")
+	if err != nil {
+		return nil, fmt.Errorf("get settings: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string]string)
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, fmt.Errorf("scan setting: %w", err)
+		}
+		result[k] = v
+	}
+	return result, rows.Err()
 }

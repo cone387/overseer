@@ -44,6 +44,9 @@ func (m *mockStore) UpdateChannel(_ *model.Channel) error                       
 func (m *mockStore) DeleteChannel(_ string) error                                  { return nil }
 func (m *mockStore) ListChannels() ([]model.Channel, error)                        { return nil, nil }
 func (m *mockStore) GetChannelByName(_ string) (*model.Channel, error)             { return nil, nil }
+func (m *mockStore) GetSetting(_ string) (string, error)                           { return "", nil }
+func (m *mockStore) SetSetting(_ string, _ string) error                           { return nil }
+func (m *mockStore) GetSettings(_ string) (map[string]string, error)               { return nil, nil }
 
 // Auth stubs
 func (m *mockStore) CreateUser(_ *model.User) error                        { return nil }

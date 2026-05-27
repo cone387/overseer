@@ -52,6 +52,11 @@ type Store interface {
 	ListChannels() ([]model.Channel, error)
 	GetChannelByName(name string) (*model.Channel, error)
 
+	// Settings operations
+	GetSetting(key string) (string, error)
+	SetSetting(key string, value string) error
+	GetSettings(prefix string) (map[string]string, error)
+
 	// Auth operations
 	CreateUser(u *model.User) error
 	GetUserByUsername(username string) (*model.User, error)
