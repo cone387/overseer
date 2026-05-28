@@ -44,6 +44,8 @@ type Store interface {
 	ListDevices() ([]model.Device, error)
 	GetDefaultDevice() (*model.Device, error)
 	SetDefaultDevice(id string) error
+	GetDeviceByKey(deviceKey string, deviceType string) (*model.Device, error)
+	CountDevicesByType(deviceType string) (int, error)
 
 	// Channel operations
 	CreateChannel(ch *model.Channel) error

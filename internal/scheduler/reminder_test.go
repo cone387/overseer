@@ -39,6 +39,8 @@ func (m *mockStore) DeleteDevice(_ string) error                                
 func (m *mockStore) ListDevices() ([]model.Device, error)                          { return nil, nil }
 func (m *mockStore) GetDefaultDevice() (*model.Device, error)                      { return nil, nil }
 func (m *mockStore) SetDefaultDevice(_ string) error                               { return nil }
+func (m *mockStore) GetDeviceByKey(_ string, _ string) (*model.Device, error)      { return nil, nil }
+func (m *mockStore) CountDevicesByType(_ string) (int, error)                      { return 0, nil }
 func (m *mockStore) CreateChannel(_ *model.Channel) error                          { return nil }
 func (m *mockStore) UpdateChannel(_ *model.Channel) error                          { return nil }
 func (m *mockStore) DeleteChannel(_ string) error                                  { return nil }

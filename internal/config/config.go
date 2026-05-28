@@ -4,6 +4,7 @@ package config
 type Config struct {
 	Server     ServerConfig     `yaml:"server"`
 	Bark       BarkConfig       `yaml:"bark"`
+	Desktop    DesktopConfig    `yaml:"desktop"`
 	LLM        LLMConfig        `yaml:"llm"`
 	Channels   []Channel        `yaml:"channels"`
 	Rules      []Rule           `yaml:"rules"`
@@ -33,6 +34,15 @@ type BarkConfig struct {
 	DeviceKey  string `yaml:"device_key"`
 	Timeout    int    `yaml:"timeout"`
 	MaxRetries int    `yaml:"max_retries"`
+}
+
+// DesktopConfig holds desktop client registration settings.
+type DesktopConfig struct {
+	// RegisterToken is a shared secret required for desktop self-registration.
+	// If empty, desktop registration is disabled.
+	RegisterToken string `yaml:"register_token"`
+	// MaxDevices limits the number of desktop devices that can be registered. 0 = unlimited.
+	MaxDevices int `yaml:"max_devices"`
 }
 
 // Channel defines a notification channel with its push parameters.

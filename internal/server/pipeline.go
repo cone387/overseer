@@ -240,6 +240,7 @@ func (p *Pipeline) broadcastPushEvent(msg *model.Message) {
 			"channel": msg.Channel,
 			"title":   msg.Title,
 			"body":    msg.Body,
+			"url":     msg.URL,
 			"status":  string(msg.Status),
 			"time":    msg.ReceivedAt.Format(time.RFC3339),
 		},

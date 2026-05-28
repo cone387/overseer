@@ -37,11 +37,16 @@ func (s *testStore) DeleteDevice(_ string) error                    { return nil
 func (s *testStore) ListDevices() ([]model.Device, error)           { return nil, nil }
 func (s *testStore) GetDefaultDevice() (*model.Device, error)       { return nil, nil }
 func (s *testStore) SetDefaultDevice(_ string) error                { return nil }
+func (s *testStore) GetDeviceByKey(_ string, _ string) (*model.Device, error) { return nil, nil }
+func (s *testStore) CountDevicesByType(_ string) (int, error)       { return 0, nil }
 func (s *testStore) CreateChannel(_ *model.Channel) error           { return nil }
 func (s *testStore) UpdateChannel(_ *model.Channel) error           { return nil }
 func (s *testStore) DeleteChannel(_ string) error                   { return nil }
 func (s *testStore) ListChannels() ([]model.Channel, error)         { return nil, nil }
 func (s *testStore) GetChannelByName(_ string) (*model.Channel, error) { return nil, nil }
+func (s *testStore) GetSetting(_ string) (string, error)               { return "", nil }
+func (s *testStore) SetSetting(_ string, _ string) error               { return nil }
+func (s *testStore) GetSettings(_ string) (map[string]string, error)   { return nil, nil }
 func (s *testStore) CreateUser(_ *model.User) error                    { return nil }
 func (s *testStore) GetUserByUsername(_ string) (*model.User, error)   { return nil, nil }
 func (s *testStore) GetUserCount() (int, error)                        { return 0, nil }

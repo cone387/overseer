@@ -53,7 +53,33 @@ func (s *SQLiteStore) Migrate() error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
+
+	// Conditional migration: add 'type' column to devices if it doesn't exist.
+	// SQLite doesn't support ALTER TABLE ADD COLUMN IF NOT EXISTS.
+	if !s.columnExists("devices", "type") {
+		if _, err := s.db.Exec(migrations.DesktopDevicesAlterSQL); err != nil {
+			return fmt.Errorf("migrate (desktop devices alter): %w", err)
+		}
+	}
+
+	// Run the remaining desktop devices migration statements (indexes etc.)
+	for _, stmt := range migrations.DesktopDevicesMigration {
+		if _, err := s.db.Exec(stmt); err != nil {
+			return fmt.Errorf("migrate (desktop devices): %w", err)
+		}
+	}
+
 	return nil
+}
+
+// columnExists checks if a column exists in a table using pragma_table_info.
+func (s *SQLiteStore) columnExists(table, column string) bool {
+	query := fmt.Sprintf("SELECT COUNT(*) FROM pragma_table_info('%s') WHERE name = ?", table)
+	var count int
+	if err := s.db.QueryRow(query, column).Scan(&count); err != nil {
+		return false
+	}
+	return count > 0
 }
 
 // Close closes the underlying database connection.
@@ -387,10 +413,14 @@ func scanReminders(rows *sql.Rows) ([]model.Reminder, error) {
 // --- Device operations ---
 
 func (s *SQLiteStore) CreateDevice(d *model.Device) error {
+	deviceType := d.Type
+	if deviceType == "" {
+		deviceType = model.DeviceTypeBark
+	}
 	_, err := s.db.Exec(`
-		INSERT INTO devices (id, name, device_key, is_default, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		d.ID, d.Name, d.DeviceKey, boolToInt(d.IsDefault), d.CreatedAt, d.UpdatedAt,
+		INSERT INTO devices (id, name, device_key, type, is_default, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		d.ID, d.Name, d.DeviceKey, deviceType, boolToInt(d.IsDefault), d.CreatedAt, d.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("create device: %w", err)
@@ -400,9 +430,9 @@ func (s *SQLiteStore) CreateDevice(d *model.Device) error {
 
 func (s *SQLiteStore) UpdateDevice(d *model.Device) error {
 	result, err := s.db.Exec(`
-		UPDATE devices SET name = ?, device_key = ?, is_default = ?, updated_at = ?
+		UPDATE devices SET name = ?, device_key = ?, type = ?, is_default = ?, updated_at = ?
 		WHERE id = ?`,
-		d.Name, d.DeviceKey, boolToInt(d.IsDefault), time.Now(), d.ID,
+		d.Name, d.DeviceKey, d.Type, boolToInt(d.IsDefault), time.Now(), d.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update device: %w", err)
@@ -428,7 +458,7 @@ func (s *SQLiteStore) DeleteDevice(id string) error {
 
 func (s *SQLiteStore) ListDevices() ([]model.Device, error) {
 	rows, err := s.db.Query(`
-		SELECT id, name, device_key, is_default, created_at, updated_at
+		SELECT id, name, device_key, type, is_default, created_at, updated_at
 		FROM devices ORDER BY is_default DESC, created_at ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("list devices: %w", err)
@@ -439,7 +469,7 @@ func (s *SQLiteStore) ListDevices() ([]model.Device, error) {
 	for rows.Next() {
 		var d model.Device
 		var isDefault int
-		if err := rows.Scan(&d.ID, &d.Name, &d.DeviceKey, &isDefault, &d.CreatedAt, &d.UpdatedAt); err != nil {
+		if err := rows.Scan(&d.ID, &d.Name, &d.DeviceKey, &d.Type, &isDefault, &d.CreatedAt, &d.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan device: %w", err)
 		}
 		d.IsDefault = isDefault != 0
@@ -452,9 +482,9 @@ func (s *SQLiteStore) GetDefaultDevice() (*model.Device, error) {
 	var d model.Device
 	var isDefault int
 	err := s.db.QueryRow(`
-		SELECT id, name, device_key, is_default, created_at, updated_at
+		SELECT id, name, device_key, type, is_default, created_at, updated_at
 		FROM devices WHERE is_default = 1 LIMIT 1`).
-		Scan(&d.ID, &d.Name, &d.DeviceKey, &isDefault, &d.CreatedAt, &d.UpdatedAt)
+		Scan(&d.ID, &d.Name, &d.DeviceKey, &d.Type, &isDefault, &d.CreatedAt, &d.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -487,6 +517,34 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// GetDeviceByKey looks up a device by its key and type.
+func (s *SQLiteStore) GetDeviceByKey(deviceKey string, deviceType string) (*model.Device, error) {
+	var d model.Device
+	var isDefault int
+	err := s.db.QueryRow(`
+		SELECT id, name, device_key, type, is_default, created_at, updated_at
+		FROM devices WHERE device_key = ? AND type = ?`, deviceKey, deviceType).
+		Scan(&d.ID, &d.Name, &d.DeviceKey, &d.Type, &isDefault, &d.CreatedAt, &d.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get device by key: %w", err)
+	}
+	d.IsDefault = isDefault != 0
+	return &d, nil
+}
+
+// CountDevicesByType returns the number of devices with the given type.
+func (s *SQLiteStore) CountDevicesByType(deviceType string) (int, error) {
+	var count int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM devices WHERE type = ?`, deviceType).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count devices by type: %w", err)
+	}
+	return count, nil
 }
 
 // --- Channel operations ---

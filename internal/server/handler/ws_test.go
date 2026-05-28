@@ -39,7 +39,7 @@ func setupWSRouter() (*gin.Engine, *ws.Hub) {
 	hub := ws.NewHub(20)
 	go hub.Run()
 
-	h := NewWSHandler(hub, testWSSecret)
+	h := NewWSHandler(hub, testWSSecret, nil)
 	h.Register(engine)
 	return engine, hub
 }

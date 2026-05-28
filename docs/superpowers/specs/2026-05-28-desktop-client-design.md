@@ -22,13 +22,14 @@ Build a lightweight, persistent desktop notification receiver for Windows and ma
 
 ### Database Migration
 
-Add `004_desktop_device_type.go` to extend the `devices` table:
+Add `006_desktop_devices.go` to extend the `devices` table:
 
 ```sql
-ALTER TABLE devices ADD COLUMN type TEXT DEFAULT 'bark';
+ALTER TABLE devices ADD COLUMN type TEXT NOT NULL DEFAULT 'bark';
+CREATE INDEX IF NOT EXISTS idx_devices_type_key ON devices(type, device_key);
 ```
 
-Existing Bark devices retain `type = 'bark'` by default. A new index on `(type, device_key)` is recommended if the device table grows.
+Existing Bark devices retain `type = 'bark'` by default. The migration is idempotent (checks if column exists before ALTER).
 
 ### Model Update
 
@@ -54,11 +55,12 @@ type Device struct {
 
 ```json
 {
-  "name": "MacBook Pro"
+  "name": "MacBook Pro",
+  "token": "your-register-token-from-config"
 }
 ```
 
-`name` is optional. If omitted, the server generates a default like `"Desktop <hostname>"`.
+`name` is optional (defaults to "Desktop Client"). `token` is **required** and must match the `desktop.register_token` in config.yaml.
 
 **Response:**
 
@@ -69,7 +71,7 @@ type Device struct {
   "data": {
     "id": "uuid",
     "name": "MacBook Pro",
-    "device_key": "dk_xxxxxxxxxxxxxxxx",
+    "device_key": "dk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "type": "desktop",
     "is_default": false,
     "created_at": "...",
@@ -78,9 +80,10 @@ type Device struct {
 }
 ```
 
-- `device_key` is a long-lived API key (`dk_` prefix + 32 random alphanumeric characters).
-- The endpoint is **publicly accessible** (no JWT required) so the desktop client can self-register on first launch without any pre-existing credentials. If abuse is a concern, a simple rate-limit by IP can be added later.
-- Implementation note: register this route **outside** the authenticated API group (e.g., directly on the Gin engine or a public sub-router).
+- `device_key` is a long-lived API key (`dk_` prefix + 32 random hex characters).
+- The endpoint requires a valid `token` matching `desktop.register_token` from config.yaml. If `register_token` is empty, registration is disabled (403).
+- A `max_devices` limit can be configured to prevent abuse.
+- Implementation note: register this route **outside** the authenticated API group (e.g., directly on the Gin engine).
 
 ### WebSocket Authentication Extension
 

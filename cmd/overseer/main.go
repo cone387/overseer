@@ -114,7 +114,7 @@ func main() {
 	}
 
 	// Initialize WebSocket Hub
-	wsHub := ws.NewHub(20)
+	wsHub := ws.NewHub(0) // use default (50 connections)
 	go wsHub.Run()
 
 	// Helper: get default device key from database
@@ -326,8 +326,12 @@ func main() {
 	authHandler.RegisterRoutes(engine)
 
 	// WebSocket - JWT token-based auth via query param
-	wsHandler := handler.NewWSHandler(wsHub, jwtSecret)
+	wsHandler := handler.NewWSHandler(wsHub, jwtSecret, db)
 	wsHandler.Register(engine)
+
+	// Desktop client self-registration - token-based auth (no JWT required)
+	desktopHandler := handler.NewDesktopHandler(db, cfg.Desktop)
+	desktopHandler.RegisterRoutes(engine)
 
 	// Authenticated API routes (accepts JWT or API Key)
 	authGroup := engine.Group("/")

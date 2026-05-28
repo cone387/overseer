@@ -6,7 +6,7 @@ import (
 
 const (
 	// DefaultMaxConns is the default maximum number of concurrent WebSocket connections.
-	DefaultMaxConns = 20
+	DefaultMaxConns = 50
 )
 
 // Event represents a WebSocket event broadcast to connected clients.

@@ -122,6 +122,19 @@ func (m *mockStore) SetDefaultDevice(id string) error {
 	return args.Error(0)
 }
 
+func (m *mockStore) GetDeviceByKey(deviceKey string, deviceType string) (*model.Device, error) {
+	args := m.Called(deviceKey, deviceType)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*model.Device), args.Error(1)
+}
+
+func (m *mockStore) CountDevicesByType(deviceType string) (int, error) {
+	args := m.Called(deviceType)
+	return args.Int(0), args.Error(1)
+}
+
 func (m *mockStore) CreateChannel(ch *model.Channel) error {
 	args := m.Called(ch)
 	return args.Error(0)

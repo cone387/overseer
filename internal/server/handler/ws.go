@@ -6,7 +6,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
+	"github.com/overseer/overseer/internal/model"
 	"github.com/overseer/overseer/internal/server/middleware"
+	"github.com/overseer/overseer/internal/store"
 	"github.com/overseer/overseer/internal/ws"
 )
 
@@ -22,13 +24,15 @@ var upgrader = websocket.Upgrader{
 type WSHandler struct {
 	hub       *ws.Hub
 	jwtSecret string
+	store     store.Store
 }
 
-// NewWSHandler creates a new WSHandler with the given Hub and JWT secret.
-func NewWSHandler(hub *ws.Hub, jwtSecret string) *WSHandler {
+// NewWSHandler creates a new WSHandler with the given Hub, JWT secret, and store.
+func NewWSHandler(hub *ws.Hub, jwtSecret string, db store.Store) *WSHandler {
 	return &WSHandler{
 		hub:       hub,
 		jwtSecret: jwtSecret,
+		store:     db,
 	}
 }
 
@@ -40,8 +44,27 @@ func (h *WSHandler) Register(engine *gin.Engine) {
 }
 
 // HandleWS upgrades the HTTP connection to a WebSocket connection.
-// Authentication is performed via the "token" query parameter (JWT) or the overseer_token cookie.
+// Authentication is performed via:
+// 1. "api_key" query parameter (for desktop clients)
+// 2. "token" query parameter (JWT) or the overseer_token cookie (for Web UI)
 func (h *WSHandler) HandleWS(c *gin.Context) {
+	// Try desktop client api_key authentication first
+	apiKey := c.Query("api_key")
+	if apiKey != "" {
+		device, err := h.store.GetDeviceByKey(apiKey, model.DeviceTypeDesktop)
+		if err != nil || device == nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"code":    401,
+				"message": "unauthorized: invalid api_key",
+			})
+			return
+		}
+		// Desktop client authenticated successfully
+		h.upgradeConnection(c)
+		return
+	}
+
+	// Fall through to JWT/cookie authentication (Web UI)
 	tokenStr := c.Query("token")
 	if tokenStr == "" {
 		// Try cookie
@@ -74,6 +97,11 @@ func (h *WSHandler) HandleWS(c *gin.Context) {
 		return
 	}
 
+	h.upgradeConnection(c)
+}
+
+// upgradeConnection upgrades the HTTP connection to WebSocket and registers the client.
+func (h *WSHandler) upgradeConnection(c *gin.Context) {
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		// Upgrade failure is handled by the upgrader which writes the HTTP error.
