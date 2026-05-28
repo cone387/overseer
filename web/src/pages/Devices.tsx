@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { fetchDevices, createDevice, deleteDevice, setDefaultDevice, Device, CreateDeviceRequest } from '../api'
+import { fetchDeviceStatus, createDevice, deleteDevice, setDefaultDevice, Device, CreateDeviceRequest } from '../api'
 import './Pages.css'
 
 function Devices() {
@@ -23,7 +23,7 @@ function Devices() {
     setLoading(true)
     setError('')
     try {
-      const res = await fetchDevices()
+      const res = await fetchDeviceStatus()
       setDevices(res.data || [])
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载设备列表失败')
@@ -168,8 +168,24 @@ function Devices() {
               <div className="device-header">
                 <div className="device-info">
                   <h4 className="device-name">
+                    {d.type === 'desktop' && (
+                      <span
+                        className="device-status-dot"
+                        style={{
+                          display: 'inline-block',
+                          width: '8px',
+                          height: '8px',
+                          borderRadius: '50%',
+                          backgroundColor: d.online ? '#22c55e' : '#9ca3af',
+                          marginRight: '6px',
+                          verticalAlign: 'middle',
+                        }}
+                        title={d.online ? '在线' : '离线'}
+                      />
+                    )}
                     {d.name}
                     {d.is_default && <span className="device-badge">默认</span>}
+                    {d.type === 'desktop' && <span className="device-badge" style={{ backgroundColor: '#3b82f6' }}>桌面</span>}
                   </h4>
                   <span className="device-key">{maskDeviceKey(d.device_key)}</span>
                 </div>

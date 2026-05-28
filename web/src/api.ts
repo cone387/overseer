@@ -313,7 +313,9 @@ export interface Device {
   id: string
   name: string
   device_key: string
+  type?: string
   is_default: boolean
+  online?: boolean
   created_at: string
   updated_at: string
 }
@@ -326,6 +328,10 @@ export interface CreateDeviceRequest {
 
 export function fetchDevices(): Promise<ApiResponse<Device[]>> {
   return request<Device[]>('/api/devices')
+}
+
+export function fetchDeviceStatus(): Promise<ApiResponse<Device[]>> {
+  return request<Device[]>('/api/devices/status')
 }
 
 export function createDevice(data: CreateDeviceRequest): Promise<ApiResponse<Device>> {

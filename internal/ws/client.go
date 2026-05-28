@@ -30,9 +30,10 @@ const (
 
 // Client represents a single WebSocket connection managed by the Hub.
 type Client struct {
-	hub  *Hub
-	conn *websocket.Conn
-	send chan Event
+	hub       *Hub
+	conn      *websocket.Conn
+	send      chan Event
+	DeviceKey string // Set for desktop clients (empty for Web UI clients)
 }
 
 // NewClient creates a new Client associated with the given hub and connection.

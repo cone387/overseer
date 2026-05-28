@@ -59,8 +59,8 @@ func (h *WSHandler) HandleWS(c *gin.Context) {
 			})
 			return
 		}
-		// Desktop client authenticated successfully
-		h.upgradeConnection(c)
+		// Desktop client authenticated successfully — pass device key for tracking
+		h.upgradeConnectionWithKey(c, device.DeviceKey)
 		return
 	}
 
@@ -97,18 +97,19 @@ func (h *WSHandler) HandleWS(c *gin.Context) {
 		return
 	}
 
-	h.upgradeConnection(c)
+	h.upgradeConnectionWithKey(c, "")
 }
 
-// upgradeConnection upgrades the HTTP connection to WebSocket and registers the client.
-func (h *WSHandler) upgradeConnection(c *gin.Context) {
+// upgradeConnectionWithKey upgrades the HTTP connection to WebSocket and registers the client.
+// deviceKey is set for desktop clients to enable online status tracking.
+func (h *WSHandler) upgradeConnectionWithKey(c *gin.Context, deviceKey string) {
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
-		// Upgrade failure is handled by the upgrader which writes the HTTP error.
 		return
 	}
 
 	client := ws.NewClient(h.hub, conn)
+	client.DeviceKey = deviceKey
 	h.hub.Register(client)
 
 	go client.WritePump()

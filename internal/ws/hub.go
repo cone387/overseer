@@ -118,3 +118,20 @@ func (h *Hub) Register(client *Client) {
 func (h *Hub) Unregister(client *Client) {
 	h.unregister <- client
 }
+
+// OnlineDeviceKeys returns the set of device keys that have active WebSocket connections.
+// Only returns non-empty keys (i.e., desktop clients that authenticated with api_key).
+func (h *Hub) OnlineDeviceKeys() []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	seen := make(map[string]bool)
+	var keys []string
+	for client := range h.clients {
+		if client.DeviceKey != "" && !seen[client.DeviceKey] {
+			seen[client.DeviceKey] = true
+			keys = append(keys, client.DeviceKey)
+		}
+	}
+	return keys
+}

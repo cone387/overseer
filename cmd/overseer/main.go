@@ -380,6 +380,10 @@ func main() {
 	deviceHandler := handler.NewDeviceHandler(db)
 	deviceHandler.RegisterRoutes(api)
 
+	// Device Status API (online/offline tracking)
+	deviceStatusHandler := handler.NewDeviceStatusHandler(db, wsHub)
+	deviceStatusHandler.RegisterRoutes(api)
+
 	// Channel API
 	channelHandler := handler.NewChannelHandler(db)
 	channelHandler.RegisterRoutes(api)
