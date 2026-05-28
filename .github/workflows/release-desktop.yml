@@ -1,0 +1,96 @@
+name: Release Desktop Client
+
+on:
+  push:
+    tags:
+      - 'desktop-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            ext: .exe
+            name: overseer-desktop-windows-amd64.exe
+          - os: windows-latest
+            goos: windows
+            goarch: arm64
+            ext: .exe
+            name: overseer-desktop-windows-arm64.exe
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+            ext: ""
+            name: overseer-desktop-macos-amd64
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            ext: ""
+            name: overseer-desktop-macos-arm64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            ext: ""
+            name: overseer-desktop-linux-amd64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o ${{ matrix.name }} ./cmd/desktop
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Desktop Client ${{ github.ref_name }}"
+          body: |
+            ## Overseer Desktop Client
+
+            轻量级桌面通知客户端，下载对应平台的文件后直接运行即可。
+
+            ### 使用方式
+            1. 下载对应平台的可执行文件
+            2. 双击运行，首次启动会弹出配置窗口
+            3. 输入 Overseer 服务器地址和注册令牌
+            4. 点击连接，开始接收通知
+
+            ### 平台说明
+            - **Windows**: 下载 `overseer-desktop-windows-amd64.exe`
+            - **macOS (Intel)**: 下载 `overseer-desktop-macos-amd64`，运行前需 `chmod +x`
+            - **macOS (Apple Silicon)**: 下载 `overseer-desktop-macos-arm64`，运行前需 `chmod +x`
+            - **Linux**: 下载 `overseer-desktop-linux-amd64`，运行前需 `chmod +x`
+          files: dist/**/*
+          draft: false
+          prerelease: false

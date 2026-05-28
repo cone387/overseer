@@ -2,79 +2,79 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"log"
 	"os"
 
 	"github.com/overseer/overseer/cmd/desktop/internal/api"
 	"github.com/overseer/overseer/cmd/desktop/internal/config"
 	"github.com/overseer/overseer/cmd/desktop/internal/notifier"
+	"github.com/overseer/overseer/cmd/desktop/internal/setup"
 	"github.com/overseer/overseer/cmd/desktop/internal/tray"
 	"github.com/overseer/overseer/cmd/desktop/internal/wsclient"
 )
 
+// version is set by -ldflags at build time.
+var version = "dev"
+
 func main() {
-	serverURL := flag.String("server", "", "Overseer server URL (e.g. http://localhost:9721)")
-	registerToken := flag.String("token", "", "Registration token for first-time setup")
-	deviceName := flag.String("name", "", "Device name for registration")
+	// Optional CLI flags (for advanced users / scripting)
+	serverURL := flag.String("server", "", "Overseer server URL")
+	registerToken := flag.String("token", "", "Registration token")
+	deviceName := flag.String("name", "", "Device name")
+	showVersion := flag.Bool("version", false, "Show version")
 	flag.Parse()
 
+	if *showVersion {
+		log.Printf("overseer-desktop %s\n", version)
+		os.Exit(0)
+	}
+
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.Println("[desktop] starting overseer desktop client...")
+	log.Printf("[desktop] overseer-desktop %s starting...", version)
 
 	// Load or create config
 	cfg, err := config.Load()
 	if err != nil {
-		log.Printf("[desktop] config load error (will use defaults): %v", err)
+		log.Printf("[desktop] config load error: %v", err)
 		cfg = &config.Config{}
 	}
 
-	// Override server URL from flag if provided
-	if *serverURL != "" {
-		cfg.ServerURL = *serverURL
-		if err := config.Save(cfg); err != nil {
-			log.Printf("[desktop] failed to save config: %v", err)
-		}
-	}
-
-	// If no server URL configured, prompt and exit
-	if cfg.ServerURL == "" {
-		fmt.Println("No server URL configured. Use --server flag to set it:")
-		fmt.Println("  overseer-desktop --server http://localhost:9721 --token YOUR_TOKEN")
-		os.Exit(1)
-	}
-
-	// If no API key, register the device
-	if cfg.APIKey == "" {
-		if *registerToken == "" {
-			fmt.Println("No API key found. First-time registration requires --token flag:")
-			fmt.Println("  overseer-desktop --server http://localhost:9721 --token YOUR_TOKEN")
-			os.Exit(1)
-		}
-
+	// If CLI flags provided, use them (for scripting / CI)
+	if *serverURL != "" && *registerToken != "" {
 		name := *deviceName
 		if name == "" {
 			hostname, _ := os.Hostname()
-			if hostname != "" {
-				name = "Desktop " + hostname
-			} else {
-				name = "Desktop Client"
-			}
+			name = "Desktop " + hostname
 		}
 
-		log.Printf("[desktop] registering device %q with server %s...", name, cfg.ServerURL)
+		cfg.ServerURL = *serverURL
 		device, err := api.Register(cfg.ServerURL, name, *registerToken)
 		if err != nil {
 			log.Fatalf("[desktop] registration failed: %v", err)
 		}
-
 		cfg.APIKey = device.DeviceKey
 		cfg.DeviceID = device.ID
 		cfg.DeviceName = device.Name
 		if err := config.Save(cfg); err != nil {
-			log.Fatalf("[desktop] failed to save config after registration: %v", err)
+			log.Fatalf("[desktop] failed to save config: %v", err)
 		}
-		log.Printf("[desktop] registered successfully as %q (id=%s)", device.Name, device.ID)
+		log.Printf("[desktop] registered as %q", device.Name)
+	}
+
+	// If not configured yet, show setup dialog
+	if cfg.ServerURL == "" || cfg.APIKey == "" {
+		log.Println("[desktop] first-time setup required, showing dialog...")
+
+		result, err := setup.ShowDialog()
+		if err != nil {
+			log.Fatalf("[desktop] setup: %v", err)
+		}
+
+		if err := setup.Run(cfg, *result); err != nil {
+			log.Fatalf("[desktop] setup failed: %v", err)
+		}
+
+		log.Printf("[desktop] setup complete: registered as %q", cfg.DeviceName)
 	}
 
 	// Create notifier

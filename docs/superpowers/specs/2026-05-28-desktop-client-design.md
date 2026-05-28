@@ -114,6 +114,10 @@ cmd/desktop/
 ├── internal/
 │   ├── config/config.go             # 本地 JSON 配置读写
 │   ├── api/api.go                   # HTTP 客户端（注册）
+│   ├── setup/
+│   │   ├── setup.go                 # 首次配置逻辑
+│   │   ├── dialog_windows.go       # Windows WPF 配置对话框
+│   │   └── dialog_other.go         # macOS/Linux 终端交互
 │   ├── wsclient/wsclient.go        # WebSocket 客户端（重连、事件解析）
 │   ├── notifier/
 │   │   ├── notifier.go             # 通用接口 + 静音控制
@@ -253,24 +257,25 @@ Desktop wsclient 解析事件
 
 ## Section 5: 使用方式
 
-### 首次启动
+### 用户下载安装（开箱即用）
+
+1. 从 GitHub Releases 下载对应平台的可执行文件
+2. 双击运行
+3. 首次启动弹出配置窗口：
+   - 输入 Overseer 服务器地址（如 `http://your-server:9721`）
+   - 输入注册令牌（从服务器 config.yaml 中获取）
+   - 可选：自定义设备名称
+4. 点击"连接"，自动注册并开始接收通知
+5. 后续启动直接进入托盘模式，无需再次配置
+
+### 高级用法（命令行）
 
 ```bash
-# 编译
-go build -o overseer-desktop.exe ./cmd/desktop
+# 通过命令行参数注册（适合脚本/自动化）
+overseer-desktop --server http://localhost:9721 --token your-token --name "我的电脑"
 
-# 首次注册（需要 server URL 和 registration token）
-overseer-desktop --server http://localhost:9721 --token your-secret-token
-
-# 可选：指定设备名
-overseer-desktop --server http://localhost:9721 --token your-secret-token --name "我的电脑"
-```
-
-### 后续启动
-
-```bash
-# 已注册后直接运行（从 config.json 读取配置）
-overseer-desktop
+# 查看版本
+overseer-desktop --version
 ```
 
 ### 后端配置
@@ -285,7 +290,29 @@ desktop:
 
 ---
 
-## Section 6: 依赖
+## Section 6: CI/CD 自动发布
+
+### GitHub Actions（`.github/workflows/release-desktop.yml`）
+
+打 tag 触发自动构建和发布：
+
+```bash
+git tag desktop-v1.0.0
+git push origin desktop-v1.0.0
+```
+
+自动构建以下平台：
+- `overseer-desktop-windows-amd64.exe`
+- `overseer-desktop-windows-arm64.exe`
+- `overseer-desktop-macos-amd64`
+- `overseer-desktop-macos-arm64`
+- `overseer-desktop-linux-amd64`
+
+构建完成后自动创建 GitHub Release 并附带所有二进制文件。
+
+---
+
+## Section 7: 依赖
 
 | 依赖 | 用途 | 平台 |
 |------|------|------|
@@ -296,7 +323,7 @@ desktop:
 
 ---
 
-## Section 7: 未来改进
+## Section 8: 未来改进
 
 - [ ] 通知支持图片/图标（从消息 payload 中获取）
 - [ ] 通知支持不同声音（映射 Bark 的 sound 字段）
