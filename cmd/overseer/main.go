@@ -117,20 +117,24 @@ func main() {
 	wsHub := ws.NewHub(0) // use default (50 connections)
 	go wsHub.Run()
 
-	// Helper: get default device key from database
+	// Helper: get default device key from database (only bark devices are valid push targets)
 	getDefaultDeviceKey := func() string {
 		device, err := db.GetDefaultDevice()
-		if err == nil && device != nil {
+		if err == nil && device != nil && device.Type == model.DeviceTypeBark {
 			log.Printf("[overseer] push: using default device %q key=%q", device.Name, device.DeviceKey)
 			return device.DeviceKey
 		}
-		// Fallback: get first device from DB
+		// Fallback: get first bark device from DB
 		devices, err := db.ListDevices()
-		if err == nil && len(devices) > 0 {
-			log.Printf("[overseer] push: using first device %q key=%q", devices[0].Name, devices[0].DeviceKey)
-			return devices[0].DeviceKey
+		if err == nil {
+			for _, d := range devices {
+				if d.Type == model.DeviceTypeBark {
+					log.Printf("[overseer] push: using first bark device %q key=%q", d.Name, d.DeviceKey)
+					return d.DeviceKey
+				}
+			}
 		}
-		log.Println("[overseer] push: WARNING no devices configured in database")
+		log.Println("[overseer] push: WARNING no bark devices configured in database")
 		return ""
 	}
 
@@ -239,36 +243,45 @@ func main() {
 			return nil
 		}
 
-		// Push to channel
-		req := pusher.PushRequest{
-			Title: msg.Title,
-			Body:  msg.Body,
-		}
-		results := barkPusher.PushToChannel(context.Background(), req, *ch, getDefaultDeviceKey())
-
-		// Determine overall success
-		anySuccess := false
-		var lastErr string
-		for _, r := range results {
-			if r.Success {
-				anySuccess = true
-			} else {
-				lastErr = r.Error
+		// Push to channel (only if bark devices are available)
+		deviceKey := getDefaultDeviceKey()
+		if deviceKey != "" {
+			req := pusher.PushRequest{
+				Title: msg.Title,
+				Body:  msg.Body,
 			}
-		}
+			results := barkPusher.PushToChannel(context.Background(), req, *ch, deviceKey)
 
-		if anySuccess {
+			// Determine overall success
+			anySuccess := false
+			var lastErr string
+			for _, r := range results {
+				if r.Success {
+					anySuccess = true
+				} else {
+					lastErr = r.Error
+				}
+			}
+
+			if anySuccess {
+				msg.Status = model.StatusSuccess
+				now := time.Now()
+				msg.PushedAt = &now
+				_ = db.UpdateMessageStatus(msg.ID, model.StatusSuccess, "")
+			} else {
+				msg.Status = model.StatusFailed
+				msg.FailReason = lastErr
+				_ = db.UpdateMessageStatus(msg.ID, model.StatusFailed, lastErr)
+			}
+		} else {
+			// No bark devices — mark as success (desktop-only mode)
 			msg.Status = model.StatusSuccess
 			now := time.Now()
 			msg.PushedAt = &now
 			_ = db.UpdateMessageStatus(msg.ID, model.StatusSuccess, "")
-		} else {
-			msg.Status = model.StatusFailed
-			msg.FailReason = lastErr
-			_ = db.UpdateMessageStatus(msg.ID, model.StatusFailed, lastErr)
 		}
 
-		// Broadcast push event via WebSocket
+		// Broadcast push event via WebSocket (always, regardless of bark push result)
 		wsHub.Broadcast(ws.Event{
 			Type:    "push",
 			Payload: msg,
@@ -279,9 +292,6 @@ func main() {
 			esc.Track(msg)
 		}
 
-		if !anySuccess {
-			return &pushError{msg: lastErr}
-		}
 		return nil
 	}
 

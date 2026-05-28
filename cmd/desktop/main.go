@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/overseer/overseer/cmd/desktop/internal/api"
 	"github.com/overseer/overseer/cmd/desktop/internal/config"
@@ -88,21 +86,14 @@ func main() {
 		n.Show(event.Title, event.Body, event.URL)
 	})
 
-	// Create tray (manages lifecycle)
-	t := tray.New(cfg, ws)
-
-	// Start WebSocket connection
+	// Start WebSocket connection in background
 	go ws.Connect()
 
-	// Start system tray (blocks on some platforms)
-	go t.Run()
+	// Run system tray (this blocks until quit)
+	t := tray.New(cfg, ws, n)
+	t.Run()
 
-	// Wait for interrupt signal
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
+	// Cleanup after tray exits
 	log.Println("[desktop] shutting down...")
 	ws.Close()
-	t.Quit()
 }

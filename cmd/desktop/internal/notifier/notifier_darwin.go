@@ -9,10 +9,12 @@ import (
 )
 
 // Show displays a native macOS notification using osascript.
-// Note: osascript notifications do not support click callbacks natively.
-// The URL is logged but cannot be opened on click without a helper like terminal-notifier.
 func (n *Notifier) Show(title, body, clickURL string) {
-	// Escape for AppleScript string
+	if n.muted {
+		log.Printf("[notifier] muted, skipping: %s", title)
+		return
+	}
+
 	title = escapeAS(title)
 	body = escapeAS(body)
 
@@ -23,12 +25,9 @@ func (n *Notifier) Show(title, body, clickURL string) {
 		log.Printf("[notifier] failed to show notification: %v", err)
 		return
 	}
-	go func() {
-		_ = cmd.Wait()
-	}()
+	go func() { _ = cmd.Wait() }()
 }
 
-// escapeAS escapes characters for AppleScript string literals.
 func escapeAS(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, `"`, `\"`)
