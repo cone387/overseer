@@ -2,14 +2,19 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/overseer/overseer/cmd/desktop/internal/api"
+	"github.com/overseer/overseer/cmd/desktop/internal/cache"
 	"github.com/overseer/overseer/cmd/desktop/internal/config"
+	"github.com/overseer/overseer/cmd/desktop/internal/locale"
 	"github.com/overseer/overseer/cmd/desktop/internal/notifier"
 	"github.com/overseer/overseer/cmd/desktop/internal/setup"
 	"github.com/overseer/overseer/cmd/desktop/internal/tray"
+	"github.com/overseer/overseer/cmd/desktop/internal/updater"
 	"github.com/overseer/overseer/cmd/desktop/internal/wsclient"
 )
 
@@ -17,7 +22,7 @@ import (
 var version = "dev"
 
 func main() {
-	// Optional CLI flags (for advanced users / scripting)
+	// Optional CLI flags
 	serverURL := flag.String("server", "", "Overseer server URL")
 	registerToken := flag.String("token", "", "Registration token")
 	deviceName := flag.String("name", "", "Device name")
@@ -25,28 +30,27 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		log.Printf("overseer-desktop %s\n", version)
+		fmt.Printf("overseer-desktop %s\n", version)
 		os.Exit(0)
 	}
 
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.Printf("[desktop] overseer-desktop %s starting...", version)
+	log.Printf("[desktop] overseer-desktop %s starting... (lang=%s)", version, locale.Lang)
 
-	// Load or create config
+	// Load config
 	cfg, err := config.Load()
 	if err != nil {
 		log.Printf("[desktop] config load error: %v", err)
 		cfg = &config.Config{}
 	}
 
-	// If CLI flags provided, use them (for scripting / CI)
+	// CLI registration mode
 	if *serverURL != "" && *registerToken != "" {
 		name := *deviceName
 		if name == "" {
 			hostname, _ := os.Hostname()
 			name = "Desktop " + hostname
 		}
-
 		cfg.ServerURL = *serverURL
 		device, err := api.Register(cfg.ServerURL, name, *registerToken)
 		if err != nil {
@@ -55,26 +59,26 @@ func main() {
 		cfg.APIKey = device.DeviceKey
 		cfg.DeviceID = device.ID
 		cfg.DeviceName = device.Name
-		if err := config.Save(cfg); err != nil {
-			log.Fatalf("[desktop] failed to save config: %v", err)
-		}
+		_ = config.Save(cfg)
 		log.Printf("[desktop] registered as %q", device.Name)
 	}
 
-	// If not configured yet, show setup dialog
+	// First-time setup dialog
 	if cfg.ServerURL == "" || cfg.APIKey == "" {
-		log.Println("[desktop] first-time setup required, showing dialog...")
-
 		result, err := setup.ShowDialog()
 		if err != nil {
 			log.Fatalf("[desktop] setup: %v", err)
 		}
-
 		if err := setup.Run(cfg, *result); err != nil {
 			log.Fatalf("[desktop] setup failed: %v", err)
 		}
+		log.Printf("[desktop] registered as %q", cfg.DeviceName)
+	}
 
-		log.Printf("[desktop] setup complete: registered as %q", cfg.DeviceName)
+	// Initialize notification cache
+	notifCache, err := cache.New()
+	if err != nil {
+		log.Printf("[desktop] cache init error (continuing without cache): %v", err)
 	}
 
 	// Create notifier
@@ -82,18 +86,62 @@ func main() {
 
 	// Create WebSocket client
 	ws := wsclient.New(cfg.ServerURL, cfg.APIKey, func(event wsclient.PushEvent) {
-		log.Printf("[desktop] notification: %s - %s", event.Title, event.Body)
-		n.Show(event.Title, event.Body, event.URL)
+		log.Printf("[desktop] notification: [%s] %s - %s", event.Channel, event.Title, event.Body)
+
+		// Cache the notification
+		if notifCache != nil {
+			_ = notifCache.Add(cache.Entry{
+				ID:         event.ID,
+				Title:      event.Title,
+				Body:       event.Body,
+				URL:        event.URL,
+				Channel:    event.Channel,
+				Source:     event.Source,
+				ReceivedAt: time.Now(),
+			})
+		}
+
+		// Show notification (respects mute)
+		n.ShowRich(event.Title, event.Body, event.URL, event.Channel, event.Source, event.Level)
 	})
 
-	// Start WebSocket connection in background
+	// Handle auth failure (401) — clear config and re-register
+	ws.SetOnAuthFail(func() {
+		log.Println("[desktop] auth failed (401), clearing credentials...")
+		cfg.APIKey = ""
+		_ = config.Save(cfg)
+		// The WS client will stop retrying after this
+		// User needs to restart the app to re-register
+		// (In a full implementation, we'd re-show the dialog here)
+	})
+
+	// Auto-update check
+	go func() {
+		result := updater.Check(version, cfg.LastUpdateCheck)
+		if result != nil && result.Available {
+			log.Printf("[updater] new version available: %s", result.Version)
+			n.Show(
+				locale.T("notify.update_title"),
+				fmt.Sprintf(locale.T("notify.update_message"), result.Version),
+				result.DownloadURL,
+			)
+		}
+		// Update last check time
+		cfg.LastUpdateCheck = time.Now()
+		_ = config.Save(cfg)
+	}()
+
+	// Start WebSocket
 	go ws.Connect()
 
-	// Run system tray (this blocks until quit)
-	t := tray.New(cfg, ws, n)
+	// Run system tray (blocks)
+	t := tray.New(cfg, ws, n, notifCache)
 	t.Run()
 
-	// Cleanup after tray exits
+	// Cleanup
 	log.Println("[desktop] shutting down...")
 	ws.Close()
+	if notifCache != nil {
+		notifCache.Close()
+	}
 }

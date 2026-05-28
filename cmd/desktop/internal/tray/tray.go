@@ -6,7 +6,10 @@ import (
 	"runtime"
 
 	"github.com/getlantern/systray"
+	"github.com/overseer/overseer/cmd/desktop/internal/autostart"
+	"github.com/overseer/overseer/cmd/desktop/internal/cache"
 	"github.com/overseer/overseer/cmd/desktop/internal/config"
+	"github.com/overseer/overseer/cmd/desktop/internal/locale"
 	"github.com/overseer/overseer/cmd/desktop/internal/notifier"
 	"github.com/overseer/overseer/cmd/desktop/internal/wsclient"
 )
@@ -16,11 +19,12 @@ type Tray struct {
 	cfg      *config.Config
 	ws       *wsclient.Client
 	notifier *notifier.Notifier
+	cache    *cache.Cache
 }
 
 // New creates a new Tray instance.
-func New(cfg *config.Config, ws *wsclient.Client, n *notifier.Notifier) *Tray {
-	return &Tray{cfg: cfg, ws: ws, notifier: n}
+func New(cfg *config.Config, ws *wsclient.Client, n *notifier.Notifier, c *cache.Cache) *Tray {
+	return &Tray{cfg: cfg, ws: ws, notifier: n, cache: c}
 }
 
 // Run starts the system tray. This blocks until Quit is called.
@@ -38,37 +42,91 @@ func (t *Tray) onReady() {
 	systray.SetTooltip("Overseer - " + t.cfg.DeviceName)
 	systray.SetIcon(iconData)
 
-	// Status (non-clickable)
-	mStatus := systray.AddMenuItem("● 已连接", "连接状态")
+	// Status
+	mStatus := systray.AddMenuItem(locale.T("tray.connected"), "")
 	mStatus.Disable()
 
 	systray.AddSeparator()
 
-	// Mute toggle
-	mMute := systray.AddMenuItemCheckbox("静音", "静音通知", false)
+	// Recent notifications submenu
+	mRecent := systray.AddMenuItem(locale.T("tray.recent"), "")
+	var recentItems []*systray.MenuItem
+	if t.cache != nil {
+		entries, _ := t.cache.Recent(5)
+		if len(entries) == 0 {
+			item := mRecent.AddSubMenuItem(locale.T("tray.no_history"), "")
+			item.Disable()
+			recentItems = append(recentItems, item)
+		} else {
+			for _, e := range entries {
+				title := e.Title
+				if len(title) > 30 {
+					title = title[:30] + "..."
+				}
+				item := mRecent.AddSubMenuItem(title, e.URL)
+				recentItems = append(recentItems, item)
+			}
+		}
+		mRecent.AddSubMenuItem("---", "")
+		mViewAll := mRecent.AddSubMenuItem(locale.T("tray.view_all"), "")
+		recentItems = append(recentItems, mViewAll)
+	}
+
+	systray.AddSeparator()
+
+	// Mute
+	mMute := systray.AddMenuItemCheckbox(locale.T("tray.mute"), "", false)
+
+	// Auto-start
+	mAutoStart := systray.AddMenuItemCheckbox(locale.T("tray.autostart"), "", autostart.IsEnabled())
+
+	// Settings
+	mSettings := systray.AddMenuItem(locale.T("tray.settings"), "")
 
 	// Open Web UI
-	mOpenUI := systray.AddMenuItem("打开控制台", "在浏览器中打开 Overseer")
+	mOpenUI := systray.AddMenuItem(locale.T("tray.open_webui"), "")
 
 	// Reconnect
-	mReconnect := systray.AddMenuItem("重新连接", "强制重连 WebSocket")
+	mReconnect := systray.AddMenuItem(locale.T("tray.reconnect"), "")
 
 	systray.AddSeparator()
 
 	// Quit
-	mQuit := systray.AddMenuItem("退出", "退出 Overseer")
+	mQuit := systray.AddMenuItem(locale.T("tray.quit"), "")
 
 	// Status monitor
 	go func() {
 		for {
 			<-timeAfter2s()
 			if t.ws.Connected() {
-				mStatus.SetTitle("● 已连接")
+				mStatus.SetTitle(locale.T("tray.connected"))
 			} else {
-				mStatus.SetTitle("○ 已断开")
+				mStatus.SetTitle(locale.T("tray.disconnected"))
 			}
 		}
 	}()
+
+	// Handle recent notification clicks
+	if t.cache != nil {
+		for i, item := range recentItems {
+			go func(idx int, mi *systray.MenuItem) {
+				for range mi.ClickedCh {
+					// Last item is "View All"
+					entries, _ := t.cache.Recent(5)
+					if idx >= len(entries) {
+						// View All
+						t.openBrowser(t.cfg.ServerURL + "/#/history")
+					} else if idx < len(entries) {
+						url := entries[idx].URL
+						if url == "" {
+							url = t.cfg.ServerURL
+						}
+						t.openBrowser(url)
+					}
+				}
+			}(i, item)
+		}
+	}
 
 	// Menu event loop
 	for {
@@ -77,16 +135,31 @@ func (t *Tray) onReady() {
 			if mMute.Checked() {
 				mMute.Uncheck()
 				t.notifier.SetMuted(false)
-				log.Println("[tray] 通知已取消静音")
+				log.Println("[tray]", locale.T("status.unmuted"))
 			} else {
 				mMute.Check()
 				t.notifier.SetMuted(true)
-				log.Println("[tray] 通知已静音")
+				log.Println("[tray]", locale.T("status.muted"))
 			}
+		case <-mAutoStart.ClickedCh:
+			if mAutoStart.Checked() {
+				mAutoStart.Uncheck()
+				if err := autostart.Disable(); err != nil {
+					log.Printf("[tray] disable autostart: %v", err)
+				}
+			} else {
+				mAutoStart.Check()
+				if err := autostart.Enable(); err != nil {
+					log.Printf("[tray] enable autostart: %v", err)
+				}
+			}
+		case <-mSettings.ClickedCh:
+			log.Println("[tray] settings clicked (TODO: open settings dialog)")
+			// Settings dialog will be triggered here
 		case <-mOpenUI.ClickedCh:
 			t.openBrowser(t.cfg.ServerURL)
 		case <-mReconnect.ClickedCh:
-			log.Println("[tray] 正在重新连接...")
+			log.Println("[tray] reconnecting...")
 			t.ws.Reconnect()
 		case <-mQuit.ClickedCh:
 			systray.Quit()

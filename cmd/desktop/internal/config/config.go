@@ -6,14 +6,16 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 )
 
 // Config holds the desktop client's persistent configuration.
 type Config struct {
-	ServerURL  string `json:"server_url"`
-	APIKey     string `json:"api_key"`
-	DeviceID   string `json:"device_id"`
-	DeviceName string `json:"device_name"`
+	ServerURL       string    `json:"server_url"`
+	APIKey          string    `json:"api_key"`
+	DeviceID        string    `json:"device_id"`
+	DeviceName      string    `json:"device_name"`
+	LastUpdateCheck time.Time `json:"last_update_check,omitempty"`
 }
 
 // configDir returns the platform-specific config directory.

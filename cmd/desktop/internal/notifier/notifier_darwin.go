@@ -8,21 +8,28 @@ import (
 	"strings"
 )
 
-// Show displays a native macOS notification using osascript.
+// Show displays a basic macOS notification.
 func (n *Notifier) Show(title, body, clickURL string) {
-	if n.muted {
+	n.showWithLevel(title, body, clickURL, "default")
+}
+
+func (n *Notifier) showWithLevel(title, body, clickURL, level string) {
+	n.mu.Lock()
+	muted := n.muted
+	n.mu.Unlock()
+
+	if muted {
 		log.Printf("[notifier] muted, skipping: %s", title)
 		return
 	}
 
-	title = escapeAS(title)
-	body = escapeAS(body)
-
-	script := `display notification "` + body + `" with title "` + title + `"`
+	t := escapeAS(title)
+	b := escapeAS(body)
+	script := `display notification "` + b + `" with title "` + t + `"`
 
 	cmd := exec.Command("osascript", "-e", script)
 	if err := cmd.Start(); err != nil {
-		log.Printf("[notifier] failed to show notification: %v", err)
+		log.Printf("[notifier] failed: %v", err)
 		return
 	}
 	go func() { _ = cmd.Wait() }()

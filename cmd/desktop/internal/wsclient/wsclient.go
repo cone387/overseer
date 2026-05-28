@@ -2,6 +2,7 @@ package wsclient
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/url"
 	"sync"
@@ -18,6 +19,8 @@ type PushEvent struct {
 	Title   string `json:"title"`
 	Body    string `json:"body"`
 	URL     string `json:"url"`
+	Icon    string `json:"icon"`
+	Level   string `json:"level"`
 	Status  string `json:"status"`
 	Time    string `json:"time"`
 }
@@ -31,11 +34,15 @@ type wsEvent struct {
 // OnPushFunc is the callback invoked when a push event is received.
 type OnPushFunc func(event PushEvent)
 
+// OnAuthFailFunc is the callback invoked when WebSocket auth fails (401).
+type OnAuthFailFunc func()
+
 // Client manages the WebSocket connection to the Overseer backend.
 type Client struct {
-	serverURL string
-	apiKey    string
-	onPush    OnPushFunc
+	serverURL  string
+	apiKey     string
+	onPush     OnPushFunc
+	onAuthFail OnAuthFailFunc
 
 	conn   *websocket.Conn
 	mu     sync.Mutex
@@ -51,6 +58,13 @@ func New(serverURL, apiKey string, onPush OnPushFunc) *Client {
 		onPush:    onPush,
 		done:      make(chan struct{}),
 	}
+}
+
+// SetOnAuthFail sets the callback for authentication failures.
+func (c *Client) SetOnAuthFail(fn OnAuthFailFunc) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onAuthFail = fn
 }
 
 // Connected returns true if the WebSocket connection is active.
@@ -150,8 +164,18 @@ func (c *Client) dial() error {
 	q.Set("api_key", c.apiKey)
 	u.RawQuery = q.Encode()
 
-	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	conn, resp, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
+		// Check for 401 Unauthorized
+		if resp != nil && resp.StatusCode == 401 {
+			c.mu.Lock()
+			fn := c.onAuthFail
+			c.mu.Unlock()
+			if fn != nil {
+				fn()
+			}
+			return fmt.Errorf("unauthorized (401)")
+		}
 		return err
 	}
 
