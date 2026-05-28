@@ -11,6 +11,7 @@ import (
 	"github.com/overseer/overseer/cmd/desktop/internal/config"
 	"github.com/overseer/overseer/cmd/desktop/internal/locale"
 	"github.com/overseer/overseer/cmd/desktop/internal/notifier"
+	"github.com/overseer/overseer/cmd/desktop/internal/setup"
 	"github.com/overseer/overseer/cmd/desktop/internal/wsclient"
 )
 
@@ -154,8 +155,28 @@ func (t *Tray) onReady() {
 				}
 			}
 		case <-mSettings.ClickedCh:
-			log.Println("[tray] settings clicked (TODO: open settings dialog)")
-			// Settings dialog will be triggered here
+			log.Println("[tray] opening settings...")
+			go func() {
+				newURL, reReg, err := setup.ShowSettingsDialog(t.cfg)
+				if err != nil {
+					log.Printf("[tray] settings error: %v", err)
+					return
+				}
+				if reReg {
+					// Re-register: clear credentials and show setup dialog
+					t.cfg.APIKey = ""
+					t.cfg.ServerURL = newURL
+					_ = config.Save(t.cfg)
+					log.Println("[tray] re-registration requested, please restart the app")
+					return
+				}
+				if newURL != "" && newURL != t.cfg.ServerURL {
+					t.cfg.ServerURL = newURL
+					_ = config.Save(t.cfg)
+					log.Printf("[tray] server URL updated to %s, reconnecting...", newURL)
+					t.ws.Reconnect()
+				}
+			}()
 		case <-mOpenUI.ClickedCh:
 			t.openBrowser(t.cfg.ServerURL)
 		case <-mReconnect.ClickedCh:
@@ -176,12 +197,13 @@ func (t *Tray) openBrowser(url string) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", url)
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
 	case "darwin":
 		cmd = exec.Command("open", url)
 	default:
 		cmd = exec.Command("xdg-open", url)
 	}
+	cmd.SysProcAttr = hiddenWindowAttr()
 	if err := cmd.Start(); err != nil {
 		log.Printf("[tray] failed to open browser: %v", err)
 	}
