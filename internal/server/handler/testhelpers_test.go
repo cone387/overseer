@@ -248,6 +248,60 @@ func (m *mockStore) ValidateAPIKey(rawKey string) (*model.APIKey, error) {
 	return args.Get(0).(*model.APIKey), args.Error(1)
 }
 
+func (m *mockStore) AckMessage(id string, ackAt time.Time) error {
+	args := m.Called(id, ackAt)
+	return args.Error(0)
+}
+
+func (m *mockStore) SnoozeMessage(id string, snoozeUntil time.Time) error {
+	args := m.Called(id, snoozeUntil)
+	return args.Error(0)
+}
+
+func (m *mockStore) GetMessage(id string) (*model.Message, error) {
+	args := m.Called(id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*model.Message), args.Error(1)
+}
+
+func (m *mockStore) GetUnackedMessages(channelNames []string) ([]model.Message, error) {
+	args := m.Called(channelNames)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]model.Message), args.Error(1)
+}
+
+func (m *mockStore) GetCatchUpMessages(lastSeen time.Time, maxAge time.Duration) ([]model.Message, error) {
+	args := m.Called(lastSeen, maxAge)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]model.Message), args.Error(1)
+}
+
+func (m *mockStore) UpdateRepeatCount(id string, count int) error {
+	args := m.Called(id, count)
+	return args.Error(0)
+}
+
+func (m *mockStore) ExpireMessage(id string) error {
+	args := m.Called(id)
+	return args.Error(0)
+}
+
+func (m *mockStore) UpdateDeviceLastSeen(deviceKey string, lastSeen time.Time) error {
+	args := m.Called(deviceKey, lastSeen)
+	return args.Error(0)
+}
+
+func (m *mockStore) GetDeviceLastSeen(deviceKey string) (time.Time, error) {
+	args := m.Called(deviceKey)
+	return args.Get(0).(time.Time), args.Error(1)
+}
+
 // setupRouter creates a Gin engine with the webhook handler registered.
 // Used by webhook_test.go.
 func setupRouter(handler MessageHandler) *gin.Engine {

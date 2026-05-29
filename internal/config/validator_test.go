@@ -2,6 +2,7 @@ package config
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -224,4 +225,207 @@ func TestValidate_MultipleErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "bark.server_url")
 	assert.Contains(t, err.Error(), "Channel 名称重复")
 	assert.Contains(t, err.Error(), "正则表达式语法无效")
+}
+
+// --- Channel lifecycle validation ---
+
+func TestValidate_RequireAckWithValidConfig(t *testing.T) {
+	cfg := validConfig()
+	cfg.Channels = []Channel{
+		{Name: "alerts", RequireAck: true, RepeatInterval: "5m", MaxRepeats: 10},
+	}
+
+	err := validateConfig(cfg)
+	assert.NoError(t, err)
+}
+
+func TestValidate_RequireAckMissingRepeatInterval(t *testing.T) {
+	cfg := validConfig()
+	cfg.Channels = []Channel{
+		{Name: "alerts", RequireAck: true, RepeatInterval: "", MaxRepeats: 10},
+	}
+
+	err := validateConfig(cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "alerts")
+	assert.Contains(t, err.Error(), "repeat_interval")
+}
+
+func TestValidate_RequireAckInvalidRepeatInterval(t *testing.T) {
+	cfg := validConfig()
+	cfg.Channels = []Channel{
+		{Name: "alerts", RequireAck: true, RepeatInterval: "not-a-duration", MaxRepeats: 10},
+	}
+
+	err := validateConfig(cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "alerts")
+	assert.Contains(t, err.Error(), "repeat_interval")
+	assert.Contains(t, err.Error(), "无法解析")
+}
+
+func TestValidate_RequireAckRepeatIntervalTooShort(t *testing.T) {
+	cfg := validConfig()
+	cfg.Channels = []Channel{
+		{Name: "alerts", RequireAck: true, RepeatInterval: "30s", MaxRepeats: 10},
+	}
+
+	err := validateConfig(cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "alerts")
+	assert.Contains(t, err.Error(), "repeat_interval")
+	assert.Contains(t, err.Error(), "1m-24h")
+}
+
+func TestValidate_RequireAckRepeatIntervalTooLong(t *testing.T) {
+	cfg := validConfig()
+	cfg.Channels = []Channel{
+		{Name: "alerts", RequireAck: true, RepeatInterval: "25h", MaxRepeats: 10},
+	}
+
+	err := validateConfig(cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "alerts")
+	assert.Contains(t, err.Error(), "repeat_interval")
+	assert.Contains(t, err.Error(), "1m-24h")
+}
+
+func TestValidate_RequireAckRepeatIntervalBoundary(t *testing.T) {
+	cfg := validConfig()
+
+	// Exactly 1 minute - valid
+	cfg.Channels = []Channel{
+		{Name: "alerts", RequireAck: true, RepeatInterval: "1m", MaxRepeats: 5},
+	}
+	assert.NoError(t, validateConfig(cfg))
+
+	// Exactly 24 hours - valid
+	cfg.Channels = []Channel{
+		{Name: "alerts", RequireAck: true, RepeatInterval: "24h", MaxRepeats: 5},
+	}
+	assert.NoError(t, validateConfig(cfg))
+}
+
+func TestValidate_RequireAckMaxRepeatsTooLow(t *testing.T) {
+	cfg := validConfig()
+	cfg.Channels = []Channel{
+		{Name: "alerts", RequireAck: true, RepeatInterval: "5m", MaxRepeats: 0},
+	}
+
+	err := validateConfig(cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "alerts")
+	assert.Contains(t, err.Error(), "max_repeats")
+	assert.Contains(t, err.Error(), "1-100")
+}
+
+func TestValidate_RequireAckMaxRepeatsTooHigh(t *testing.T) {
+	cfg := validConfig()
+	cfg.Channels = []Channel{
+		{Name: "alerts", RequireAck: true, RepeatInterval: "5m", MaxRepeats: 101},
+	}
+
+	err := validateConfig(cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "alerts")
+	assert.Contains(t, err.Error(), "max_repeats")
+	assert.Contains(t, err.Error(), "1-100")
+}
+
+func TestValidate_RequireAckMaxRepeatsBoundary(t *testing.T) {
+	cfg := validConfig()
+
+	// Exactly 1 - valid
+	cfg.Channels = []Channel{
+		{Name: "alerts", RequireAck: true, RepeatInterval: "5m", MaxRepeats: 1},
+	}
+	assert.NoError(t, validateConfig(cfg))
+
+	// Exactly 100 - valid
+	cfg.Channels = []Channel{
+		{Name: "alerts", RequireAck: true, RepeatInterval: "5m", MaxRepeats: 100},
+	}
+	assert.NoError(t, validateConfig(cfg))
+}
+
+func TestValidate_RequireAckFalseSkipsValidation(t *testing.T) {
+	cfg := validConfig()
+	// When require_ack is false, repeat_interval and max_repeats are ignored
+	cfg.Channels = []Channel{
+		{Name: "info", RequireAck: false, RepeatInterval: "", MaxRepeats: 0},
+	}
+
+	err := validateConfig(cfg)
+	assert.NoError(t, err)
+}
+
+func TestValidate_RequireAckFalseWithInvalidValuesNoError(t *testing.T) {
+	cfg := validConfig()
+	// Even with invalid values, no error when require_ack is false
+	cfg.Channels = []Channel{
+		{Name: "info", RequireAck: false, RepeatInterval: "invalid", MaxRepeats: 999},
+	}
+
+	err := validateConfig(cfg)
+	assert.NoError(t, err)
+}
+
+// --- ValidateTTL ---
+
+func TestValidateTTL_Valid(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected time.Duration
+	}{
+		{"1m", time.Minute},
+		{"5m", 5 * time.Minute},
+		{"1h", time.Hour},
+		{"24h", 24 * time.Hour},
+		{"720h", 720 * time.Hour}, // 30 days
+		{"168h", 168 * time.Hour}, // 7 days
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			d, err := ValidateTTL(tt.input)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expected, d)
+		})
+	}
+}
+
+func TestValidateTTL_Empty(t *testing.T) {
+	_, err := ValidateTTL("")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "不能为空")
+}
+
+func TestValidateTTL_InvalidFormat(t *testing.T) {
+	_, err := ValidateTTL("not-a-duration")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "无法解析")
+}
+
+func TestValidateTTL_TooShort(t *testing.T) {
+	_, err := ValidateTTL("30s")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "小于最小值")
+}
+
+func TestValidateTTL_TooLong(t *testing.T) {
+	_, err := ValidateTTL("721h") // > 30 days
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "超过最大值")
+}
+
+func TestValidateTTL_Boundary(t *testing.T) {
+	// Exactly 1 minute - valid
+	d, err := ValidateTTL("1m")
+	assert.NoError(t, err)
+	assert.Equal(t, time.Minute, d)
+
+	// Exactly 30 days (720h) - valid
+	d, err = ValidateTTL("720h")
+	assert.NoError(t, err)
+	assert.Equal(t, 720*time.Hour, d)
 }

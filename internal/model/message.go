@@ -6,9 +6,11 @@ import "time"
 type PushStatus string
 
 const (
-	StatusPending PushStatus = "pending"
-	StatusSuccess PushStatus = "success"
-	StatusFailed  PushStatus = "failed"
+	StatusPending        PushStatus = "pending"
+	StatusSuccess        PushStatus = "success"
+	StatusFailed         PushStatus = "failed"
+	StatusExpiredUnacked PushStatus = "expired_unacked"
+	StatusExpired        PushStatus = "expired"
 )
 
 // Message represents an internal push message flowing through the system.
@@ -31,4 +33,10 @@ type Message struct {
 	Group string `json:"group,omitempty"`
 	Level string `json:"level,omitempty"`
 	URL   string `json:"url,omitempty"`
+
+	// Lifecycle fields
+	AckAt       *time.Time `json:"ack_at,omitempty"`
+	SnoozeUntil *time.Time `json:"snooze_until,omitempty"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	RepeatCount int        `json:"repeat_count"`
 }

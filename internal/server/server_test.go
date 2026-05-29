@@ -57,8 +57,19 @@ func (s *testStore) DeleteAPIKey(_ string) error                       { return 
 func (s *testStore) GetAPIKeyByHash(_ string) (*model.APIKey, error)   { return nil, nil }
 func (s *testStore) UpdateAPIKeyLastUsed(_ string) error               { return nil }
 func (s *testStore) ValidateAPIKey(_ string) (*model.APIKey, error)    { return nil, nil }
-func (s *testStore) Close() error                                      { return nil }
-func (s *testStore) Migrate() error                                    { return nil }
+func (s *testStore) AckMessage(_ string, _ time.Time) error                          { return nil }
+func (s *testStore) SnoozeMessage(_ string, _ time.Time) error                       { return nil }
+func (s *testStore) GetMessage(_ string) (*model.Message, error)                     { return nil, nil }
+func (s *testStore) GetUnackedMessages(_ []string) ([]model.Message, error)          { return nil, nil }
+func (s *testStore) GetCatchUpMessages(_ time.Time, _ time.Duration) ([]model.Message, error) {
+	return nil, nil
+}
+func (s *testStore) UpdateRepeatCount(_ string, _ int) error                         { return nil }
+func (s *testStore) ExpireMessage(_ string) error                                    { return nil }
+func (s *testStore) UpdateDeviceLastSeen(_ string, _ time.Time) error                { return nil }
+func (s *testStore) GetDeviceLastSeen(_ string) (time.Time, error)                   { return time.Time{}, nil }
+func (s *testStore) Close() error                                                    { return nil }
+func (s *testStore) Migrate() error                                                  { return nil }
 
 func testConfig() *config.Config {
 	return &config.Config{

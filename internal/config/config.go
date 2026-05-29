@@ -47,12 +47,16 @@ type DesktopConfig struct {
 
 // Channel defines a notification channel with its push parameters.
 type Channel struct {
-	Name       string   `yaml:"name"`
-	Sound      string   `yaml:"sound"`
-	Group      string   `yaml:"group"`
-	Icon       string   `yaml:"icon"`
-	Level      string   `yaml:"level"`
-	DeviceKeys []string `yaml:"device_keys"`
+	Name           string   `yaml:"name"`
+	Sound          string   `yaml:"sound"`
+	Group          string   `yaml:"group"`
+	Icon           string   `yaml:"icon"`
+	Level          string   `yaml:"level"`
+	DeviceKeys     []string `yaml:"device_keys"`
+	RequireAck     bool     `yaml:"require_ack"`
+	RepeatInterval string   `yaml:"repeat_interval"` // e.g. "5m", "1h"
+	MaxRepeats     int      `yaml:"max_repeats"`
+	SoundFile      string   `yaml:"sound_file"`
 }
 
 // Rule defines a routing rule that maps messages to channels.

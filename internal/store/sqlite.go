@@ -69,6 +69,29 @@ func (s *SQLiteStore) Migrate() error {
 		}
 	}
 
+	// Conditional migration: add lifecycle columns to messages if they don't exist.
+	if !s.columnExists("messages", "ack_at") {
+		for _, stmt := range migrations.LifecycleAlterMessagesSQL {
+			if _, err := s.db.Exec(stmt); err != nil {
+				return fmt.Errorf("migrate (lifecycle messages alter): %w", err)
+			}
+		}
+	}
+
+	// Conditional migration: add last_seen column to devices if it doesn't exist.
+	if !s.columnExists("devices", "last_seen") {
+		if _, err := s.db.Exec(migrations.LifecycleAlterDevicesSQL); err != nil {
+			return fmt.Errorf("migrate (lifecycle devices alter): %w", err)
+		}
+	}
+
+	// Run lifecycle migration statements (indexes with IF NOT EXISTS).
+	for _, stmt := range migrations.LifecycleMigration {
+		if _, err := s.db.Exec(stmt); err != nil {
+			return fmt.Errorf("migrate (lifecycle): %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -833,4 +856,253 @@ func (s *SQLiteStore) GetSettings(prefix string) (map[string]string, error) {
 		result[k] = v
 	}
 	return result, rows.Err()
+}
+
+// --- Notification lifecycle operations ---
+
+// AckMessage sets the ack_at timestamp for a message (only if not already acked).
+func (s *SQLiteStore) AckMessage(id string, ackAt time.Time) error {
+	result, err := s.db.Exec(
+		`UPDATE messages SET ack_at = ? WHERE id = ? AND ack_at IS NULL`,
+		ackAt, id,
+	)
+	if err != nil {
+		return fmt.Errorf("ack message: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("ack message: not found or already acked")
+	}
+	return nil
+}
+
+// SnoozeMessage sets the snooze_until timestamp for a message.
+func (s *SQLiteStore) SnoozeMessage(id string, snoozeUntil time.Time) error {
+	result, err := s.db.Exec(
+		`UPDATE messages SET snooze_until = ? WHERE id = ?`,
+		snoozeUntil, id,
+	)
+	if err != nil {
+		return fmt.Errorf("snooze message: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("snooze message: not found")
+	}
+	return nil
+}
+
+// GetMessage retrieves a single message by ID.
+func (s *SQLiteStore) GetMessage(id string) (*model.Message, error) {
+	var msg model.Message
+	var extraStr sql.NullString
+	var statusStr string
+	var pushedAt, ackAt, snoozeUntil, expiresAt sql.NullTime
+
+	err := s.db.QueryRow(`
+		SELECT id, source, channel, title, body, extra, status, fail_reason, retry_count,
+		       received_at, pushed_at, ack_at, snooze_until, expires_at, repeat_count
+		FROM messages WHERE id = ?`, id).
+		Scan(&msg.ID, &msg.Source, &msg.Channel, &msg.Title, &msg.Body,
+			&extraStr, &statusStr, &msg.FailReason, &msg.RetryCount,
+			&msg.ReceivedAt, &pushedAt, &ackAt, &snoozeUntil, &expiresAt, &msg.RepeatCount)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get message: %w", err)
+	}
+
+	msg.Status = model.PushStatus(statusStr)
+	if pushedAt.Valid {
+		msg.PushedAt = &pushedAt.Time
+	}
+	if ackAt.Valid {
+		msg.AckAt = &ackAt.Time
+	}
+	if snoozeUntil.Valid {
+		msg.SnoozeUntil = &snoozeUntil.Time
+	}
+	if expiresAt.Valid {
+		msg.ExpiresAt = &expiresAt.Time
+	}
+	if extraStr.Valid && extraStr.String != "" {
+		if err := json.Unmarshal([]byte(extraStr.String), &msg.Extra); err != nil {
+			return nil, fmt.Errorf("unmarshal extra: %w", err)
+		}
+	}
+
+	return &msg, nil
+}
+
+// GetUnackedMessages returns unacked, non-expired, successful messages for the given channels.
+func (s *SQLiteStore) GetUnackedMessages(channelNames []string) ([]model.Message, error) {
+	if len(channelNames) == 0 {
+		return nil, nil
+	}
+
+	placeholders := make([]string, len(channelNames))
+	args := make([]interface{}, len(channelNames))
+	for i, name := range channelNames {
+		placeholders[i] = "?"
+		args[i] = name
+	}
+
+	now := time.Now()
+	args = append(args, now)
+
+	query := fmt.Sprintf(`
+		SELECT id, source, channel, title, body, extra, status, fail_reason, retry_count,
+		       received_at, pushed_at, ack_at, snooze_until, expires_at, repeat_count
+		FROM messages
+		WHERE channel IN (%s)
+		  AND ack_at IS NULL
+		  AND (expires_at IS NULL OR expires_at > ?)
+		  AND status = 'success'
+		ORDER BY received_at ASC`,
+		strings.Join(placeholders, ","))
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get unacked messages: %w", err)
+	}
+	defer rows.Close()
+
+	return s.scanLifecycleMessages(rows)
+}
+
+// GetCatchUpMessages returns unacked messages received after lastSeen and within maxAge.
+func (s *SQLiteStore) GetCatchUpMessages(lastSeen time.Time, maxAge time.Duration) ([]model.Message, error) {
+	now := time.Now()
+	minTime := now.Add(-maxAge)
+
+	// Use the later of lastSeen and minTime as the cutoff
+	cutoff := lastSeen
+	if minTime.After(cutoff) {
+		cutoff = minTime
+	}
+
+	rows, err := s.db.Query(`
+		SELECT id, source, channel, title, body, extra, status, fail_reason, retry_count,
+		       received_at, pushed_at, ack_at, snooze_until, expires_at, repeat_count
+		FROM messages
+		WHERE received_at > ?
+		  AND ack_at IS NULL
+		ORDER BY received_at ASC`, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("get catch up messages: %w", err)
+	}
+	defer rows.Close()
+
+	return s.scanLifecycleMessages(rows)
+}
+
+// UpdateRepeatCount sets the repeat_count for a message.
+func (s *SQLiteStore) UpdateRepeatCount(id string, count int) error {
+	result, err := s.db.Exec(
+		`UPDATE messages SET repeat_count = ? WHERE id = ?`,
+		count, id,
+	)
+	if err != nil {
+		return fmt.Errorf("update repeat count: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("update repeat count: not found")
+	}
+	return nil
+}
+
+// ExpireMessage sets the status of a message to 'expired'.
+func (s *SQLiteStore) ExpireMessage(id string) error {
+	result, err := s.db.Exec(
+		`UPDATE messages SET status = 'expired' WHERE id = ?`,
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf("expire message: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("expire message: not found")
+	}
+	return nil
+}
+
+// UpdateDeviceLastSeen updates the last_seen timestamp for a device.
+func (s *SQLiteStore) UpdateDeviceLastSeen(deviceKey string, lastSeen time.Time) error {
+	result, err := s.db.Exec(
+		`UPDATE devices SET last_seen = ? WHERE device_key = ?`,
+		lastSeen, deviceKey,
+	)
+	if err != nil {
+		return fmt.Errorf("update device last seen: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("update device last seen: not found")
+	}
+	return nil
+}
+
+// GetDeviceLastSeen retrieves the last_seen timestamp for a device.
+func (s *SQLiteStore) GetDeviceLastSeen(deviceKey string) (time.Time, error) {
+	var lastSeen sql.NullTime
+	err := s.db.QueryRow(
+		`SELECT last_seen FROM devices WHERE device_key = ?`, deviceKey,
+	).Scan(&lastSeen)
+	if err == sql.ErrNoRows {
+		return time.Time{}, fmt.Errorf("get device last seen: not found")
+	}
+	if err != nil {
+		return time.Time{}, fmt.Errorf("get device last seen: %w", err)
+	}
+	if !lastSeen.Valid {
+		return time.Time{}, nil
+	}
+	return lastSeen.Time, nil
+}
+
+// scanLifecycleMessages scans rows into a slice of Message including lifecycle fields.
+func (s *SQLiteStore) scanLifecycleMessages(rows *sql.Rows) ([]model.Message, error) {
+	var messages []model.Message
+	for rows.Next() {
+		var msg model.Message
+		var extraStr sql.NullString
+		var statusStr string
+		var pushedAt, ackAt, snoozeUntil, expiresAt sql.NullTime
+
+		if err := rows.Scan(
+			&msg.ID, &msg.Source, &msg.Channel, &msg.Title, &msg.Body,
+			&extraStr, &statusStr, &msg.FailReason, &msg.RetryCount,
+			&msg.ReceivedAt, &pushedAt, &ackAt, &snoozeUntil, &expiresAt, &msg.RepeatCount,
+		); err != nil {
+			return nil, fmt.Errorf("scan message: %w", err)
+		}
+
+		msg.Status = model.PushStatus(statusStr)
+		if pushedAt.Valid {
+			msg.PushedAt = &pushedAt.Time
+		}
+		if ackAt.Valid {
+			msg.AckAt = &ackAt.Time
+		}
+		if snoozeUntil.Valid {
+			msg.SnoozeUntil = &snoozeUntil.Time
+		}
+		if expiresAt.Valid {
+			msg.ExpiresAt = &expiresAt.Time
+		}
+		if extraStr.Valid && extraStr.String != "" {
+			if err := json.Unmarshal([]byte(extraStr.String), &msg.Extra); err != nil {
+				return nil, fmt.Errorf("unmarshal extra: %w", err)
+			}
+		}
+
+		messages = append(messages, msg)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate messages: %w", err)
+	}
+	return messages, nil
 }

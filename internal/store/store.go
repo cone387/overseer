@@ -73,6 +73,17 @@ type Store interface {
 	UpdateAPIKeyLastUsed(id string) error
 	ValidateAPIKey(rawKey string) (*model.APIKey, error)
 
+	// Notification lifecycle operations
+	AckMessage(id string, ackAt time.Time) error
+	SnoozeMessage(id string, snoozeUntil time.Time) error
+	GetMessage(id string) (*model.Message, error)
+	GetUnackedMessages(channelNames []string) ([]model.Message, error)
+	GetCatchUpMessages(lastSeen time.Time, maxAge time.Duration) ([]model.Message, error)
+	UpdateRepeatCount(id string, count int) error
+	ExpireMessage(id string) error
+	UpdateDeviceLastSeen(deviceKey string, lastSeen time.Time) error
+	GetDeviceLastSeen(deviceKey string) (time.Time, error)
+
 	// Lifecycle
 	Close() error
 	Migrate() error

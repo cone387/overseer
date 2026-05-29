@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // validateConfig performs full validation of the Config structure.
@@ -15,6 +16,7 @@ func validateConfig(cfg *Config) error {
 	errs = append(errs, validateRequiredFields(cfg)...)
 	errs = append(errs, validateFieldConstraints(cfg)...)
 	errs = append(errs, validateChannelUniqueness(cfg)...)
+	errs = append(errs, validateChannelLifecycle(cfg)...)
 	errs = append(errs, validateRuleRegex(cfg)...)
 	errs = append(errs, validateDeviceKeyAvailability(cfg)...)
 
@@ -104,4 +106,57 @@ func isValidURL(s string) bool {
 		return false
 	}
 	return u.Scheme != "" && u.Host != ""
+}
+
+// validateChannelLifecycle checks lifecycle configuration for channels with require_ack enabled.
+func validateChannelLifecycle(cfg *Config) []string {
+	var errs []string
+
+	for _, ch := range cfg.Channels {
+		if !ch.RequireAck {
+			continue
+		}
+
+		// repeat_interval must be set and valid when require_ack is true
+		if ch.RepeatInterval == "" {
+			errs = append(errs, fmt.Sprintf("  - Channel %q: require_ack 为 true 时必须设置 repeat_interval", ch.Name))
+		} else {
+			d, err := time.ParseDuration(ch.RepeatInterval)
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("  - Channel %q: repeat_interval %q 无法解析为有效的时间间隔: %s", ch.Name, ch.RepeatInterval, err.Error()))
+			} else if d < time.Minute || d > 24*time.Hour {
+				errs = append(errs, fmt.Sprintf("  - Channel %q: repeat_interval %q 超出有效范围 1m-24h", ch.Name, ch.RepeatInterval))
+			}
+		}
+
+		// max_repeats must be between 1 and 100 when require_ack is true
+		if ch.MaxRepeats < 1 || ch.MaxRepeats > 100 {
+			errs = append(errs, fmt.Sprintf("  - Channel %q: max_repeats 值 %d 超出有效范围 1-100", ch.Name, ch.MaxRepeats))
+		}
+	}
+
+	return errs
+}
+
+// ValidateTTL validates a TTL string parses to a duration between 1 minute and 30 days.
+// Returns the parsed duration on success, or an error if the TTL is invalid.
+func ValidateTTL(ttl string) (time.Duration, error) {
+	if ttl == "" {
+		return 0, fmt.Errorf("ttl 不能为空")
+	}
+
+	d, err := time.ParseDuration(ttl)
+	if err != nil {
+		return 0, fmt.Errorf("ttl %q 无法解析为有效的时间间隔: %s", ttl, err.Error())
+	}
+
+	if d < time.Minute {
+		return 0, fmt.Errorf("ttl %q 小于最小值 1m", ttl)
+	}
+
+	if d > 30*24*time.Hour {
+		return 0, fmt.Errorf("ttl %q 超过最大值 30 天 (720h)", ttl)
+	}
+
+	return d, nil
 }

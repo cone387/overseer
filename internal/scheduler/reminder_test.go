@@ -62,6 +62,19 @@ func (m *mockStore) GetAPIKeyByHash(_ string) (*model.APIKey, error)       { ret
 func (m *mockStore) UpdateAPIKeyLastUsed(_ string) error                   { return nil }
 func (m *mockStore) ValidateAPIKey(_ string) (*model.APIKey, error)        { return nil, nil }
 
+// Lifecycle stubs
+func (m *mockStore) AckMessage(_ string, _ time.Time) error                          { return nil }
+func (m *mockStore) SnoozeMessage(_ string, _ time.Time) error                       { return nil }
+func (m *mockStore) GetMessage(_ string) (*model.Message, error)                     { return nil, nil }
+func (m *mockStore) GetUnackedMessages(_ []string) ([]model.Message, error)          { return nil, nil }
+func (m *mockStore) GetCatchUpMessages(_ time.Time, _ time.Duration) ([]model.Message, error) {
+	return nil, nil
+}
+func (m *mockStore) UpdateRepeatCount(_ string, _ int) error                         { return nil }
+func (m *mockStore) ExpireMessage(_ string) error                                    { return nil }
+func (m *mockStore) UpdateDeviceLastSeen(_ string, _ time.Time) error                { return nil }
+func (m *mockStore) GetDeviceLastSeen(_ string) (time.Time, error)                   { return time.Time{}, nil }
+
 func (m *mockStore) CreateReminder(r *model.Reminder) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
