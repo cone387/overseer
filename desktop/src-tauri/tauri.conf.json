@@ -12,8 +12,10 @@
     "windows": [
       {
         "title": "Overseer Desktop",
-        "width": 480,
-        "height": 520,
+        "width": 720,
+        "height": 500,
+        "minWidth": 600,
+        "minHeight": 400,
         "resizable": true,
         "center": true
       }
