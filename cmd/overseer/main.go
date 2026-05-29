@@ -23,6 +23,7 @@ import (
 	"github.com/overseer/overseer/internal/llm"
 	"github.com/overseer/overseer/internal/model"
 	"github.com/overseer/overseer/internal/pusher"
+	"github.com/overseer/overseer/internal/repeatpusher"
 	"github.com/overseer/overseer/internal/router"
 	"github.com/overseer/overseer/internal/scheduler"
 	"github.com/overseer/overseer/internal/server/handler"
@@ -116,6 +117,19 @@ func main() {
 	// Initialize WebSocket Hub
 	wsHub := ws.NewHub(0) // use default (50 connections)
 	go wsHub.Run()
+
+	// Initialize RepeatPusher for channels with require_ack
+	var ackChannels []config.Channel
+	for _, ch := range cfg.Channels {
+		if ch.RequireAck {
+			ackChannels = append(ackChannels, ch)
+		}
+	}
+	rp := repeatpusher.New(db, wsHub, ackChannels)
+	if err := rp.Start(); err != nil {
+		log.Printf("[overseer] WARNING: repeat pusher start error: %v", err)
+	}
+	log.Printf("[overseer] repeat pusher started (%d require_ack channels)", len(ackChannels))
 
 	// Helper: get default device key from database (only bark devices are valid push targets)
 	getDefaultDeviceKey := func() string {
@@ -292,6 +306,14 @@ func main() {
 			esc.Track(msg)
 		}
 
+		// Schedule for repeat push if channel requires ack
+		for _, ackCh := range ackChannels {
+			if ackCh.Name == msg.Channel {
+				_ = rp.Schedule(msg)
+				break
+			}
+		}
+
 		return nil
 	}
 
@@ -380,6 +402,10 @@ func main() {
 	deviceHandler := handler.NewDeviceHandler(db)
 	deviceHandler.RegisterRoutes(api)
 
+	// Lifecycle API (ack, snooze)
+	lifecycleHandler := handler.NewLifecycleHandler(db, wsHub, rp)
+	lifecycleHandler.RegisterRoutes(api)
+
 	// Device Status API (online/offline tracking)
 	deviceStatusHandler := handler.NewDeviceStatusHandler(db, wsHub)
 	deviceStatusHandler.RegisterRoutes(api)
@@ -458,7 +484,11 @@ func main() {
 	reminderScheduler.Stop()
 	log.Println("[overseer] reminder scheduler stopped")
 
-	// 4. Close database
+	// 4. Stop RepeatPusher
+	rp.Stop()
+	log.Println("[overseer] repeat pusher stopped")
+
+	// 5. Close database
 	if err := db.Close(); err != nil {
 		log.Printf("[overseer] database close error: %v", err)
 	}

@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/overseer/overseer/internal/config"
 	"github.com/overseer/overseer/internal/model"
 )
 
@@ -29,6 +30,7 @@ type PushRequest struct {
 	Group   string            `json:"group"`
 	Level   string            `json:"level"`
 	URL     string            `json:"url"`
+	TTL     string            `json:"ttl"`
 	Extra   map[string]string `json:"extra"`
 }
 
@@ -64,6 +66,22 @@ func (h *PushHandler) HandlePush(c *gin.Context) {
 		return
 	}
 
+	// Validate and compute expires_at from optional TTL field.
+	var expiresAt *time.Time
+	if req.TTL != "" {
+		ttlDuration, err := config.ValidateTTL(req.TTL)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"code":    400,
+				"message": "invalid ttl: " + err.Error(),
+				"data":    nil,
+			})
+			return
+		}
+		t := time.Now().Add(ttlDuration)
+		expiresAt = &t
+	}
+
 	msg := &model.Message{
 		ID:         uuid.New().String(),
 		Source:     "api",
@@ -78,6 +96,7 @@ func (h *PushHandler) HandlePush(c *gin.Context) {
 		URL:        req.URL,
 		Status:     model.StatusPending,
 		ReceivedAt: time.Now(),
+		ExpiresAt:  expiresAt,
 	}
 
 	if err := h.handler(msg); err != nil {
@@ -120,6 +139,22 @@ func (h *PushHandler) HandleTestPush(c *gin.Context) {
 		return
 	}
 
+	// Validate and compute expires_at from optional TTL field.
+	var testExpiresAt *time.Time
+	if req.TTL != "" {
+		ttlDuration, err := config.ValidateTTL(req.TTL)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"code":    400,
+				"message": "invalid ttl: " + err.Error(),
+				"data":    nil,
+			})
+			return
+		}
+		t := time.Now().Add(ttlDuration)
+		testExpiresAt = &t
+	}
+
 	msg := &model.Message{
 		ID:         uuid.New().String(),
 		Source:     "api-test",
@@ -134,6 +169,7 @@ func (h *PushHandler) HandleTestPush(c *gin.Context) {
 		URL:        req.URL,
 		Status:     model.StatusPending,
 		ReceivedAt: time.Now(),
+		ExpiresAt:  testExpiresAt,
 	}
 
 	if err := h.testHandler(msg); err != nil {

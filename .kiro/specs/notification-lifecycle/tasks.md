@@ -48,20 +48,20 @@ This plan implements the full notification lifecycle feature in two phases. Phas
     - **Property 25: TTL validation**
     - **Validates: Requirements 6.3, 6.4, 14.5**
 
-- [ ] 3. Phase 1 — Backend: Ack & Snooze API Endpoints
-  - [~] 3.1 Implement LifecycleHandler with HandleAck endpoint
+- [x] 3. Phase 1 — Backend: Ack & Snooze API Endpoints
+  - [x] 3.1 Implement LifecycleHandler with HandleAck endpoint
     - Create `internal/server/handler/lifecycle.go`
     - POST `/api/messages/:id/ack`: record `ack_at`, cancel repeat push, return 200/404
     - Handle idempotent ack (already-acked returns 200 unchanged)
     - _Requirements: 4.1, 4.2, 4.3, 4.4_
 
-  - [~] 3.2 Implement HandleSnooze endpoint
+  - [x] 3.2 Implement HandleSnooze endpoint
     - POST `/api/messages/:id/snooze`: validate duration, record `snooze_until`, schedule re-push
     - Support durations: "1h", "2h", "4h", "tomorrow_9am"
     - Return 200/400/404 as appropriate
     - _Requirements: 9.1, 9.5, 9.6_
 
-  - [~] 3.3 Register lifecycle routes in server router
+  - [x] 3.3 Register lifecycle routes in server router
     - Wire LifecycleHandler into `internal/server/server.go` route registration
     - _Requirements: 4.1, 9.1_
 
@@ -71,15 +71,15 @@ This plan implements the full notification lifecycle feature in two phases. Phas
     - **Property 13: Snooze computes snooze_until correctly**
     - **Validates: Requirements 4.1, 4.4, 9.1**
 
-- [ ] 4. Phase 1 — Backend: RepeatPusher Scheduler
-  - [~] 4.1 Implement RepeatPusher core scheduler
+- [x] 4. Phase 1 — Backend: RepeatPusher Scheduler
+  - [x] 4.1 Implement RepeatPusher core scheduler
     - Create `internal/repeatpusher/repeatpusher.go`
     - Implement `Start()` to load eligible unacked messages and schedule timers
     - Implement `Schedule()`, `Cancel()`, `ScheduleSnooze()`, `Stop()`
     - Use `time.AfterFunc` timers backed by DB state (modeled after `internal/scheduler/reminder.go`)
     - _Requirements: 7.1, 7.2, 7.3, 7.5_
 
-  - [~] 4.2 Integrate RepeatPusher with pipeline and server lifecycle
+  - [x] 4.2 Integrate RepeatPusher with pipeline and server lifecycle
     - Start RepeatPusher on server boot, schedule messages from require_ack channels after pipeline push
     - Cancel repeat push on ack, schedule snooze on snooze endpoint
     - Handle TTL expiry: mark expired messages, stop repeat push
@@ -95,8 +95,8 @@ This plan implements the full notification lifecycle feature in two phases. Phas
     - **Property 24: Expired messages excluded from repeat push and unread count**
     - **Validates: Requirements 4.2, 7.1, 7.2, 7.3, 7.5, 9.2, 9.3, 14.3, 14.4**
 
-- [ ] 5. Phase 1 — Backend: TTL Processing in Push API
-  - [~] 5.1 Accept optional ttl field in push API and compute expires_at
+- [x] 5. Phase 1 — Backend: TTL Processing in Push API
+  - [x] 5.1 Accept optional ttl field in push API and compute expires_at
     - Extend push handler in `internal/server/handler/push.go` to parse `ttl` field
     - Compute `expires_at = received_at + parsed(ttl)` and store on message
     - Validate ttl is between 1m and 30 days, return 400 on invalid

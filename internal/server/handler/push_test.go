@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/overseer/overseer/internal/model"
@@ -397,4 +398,202 @@ func TestHandlePush_WithExtra(t *testing.T) {
 	assert.NotNil(t, receivedMsg)
 	assert.Equal(t, "https://example.com", receivedMsg.Extra["url"])
 	assert.Equal(t, "high", receivedMsg.Extra["severity"])
+}
+
+func TestHandlePush_WithValidTTL(t *testing.T) {
+	var receivedMsg *model.Message
+	handler := func(msg *model.Message) error {
+		receivedMsg = msg
+		return nil
+	}
+	testHandler := func(msg *model.Message) error { return nil }
+
+	router := setupPushRouter(handler, testHandler)
+
+	body := PushRequest{
+		Title: "TTL Test",
+		Body:  "Expires in 2 hours",
+		TTL:   "2h",
+	}
+	jsonBody, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/push", bytes.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.NotNil(t, receivedMsg)
+	assert.NotNil(t, receivedMsg.ExpiresAt, "ExpiresAt should be set when TTL is provided")
+	// ExpiresAt should be approximately 2 hours from now
+	assert.WithinDuration(t, receivedMsg.ReceivedAt.Add(2*time.Hour), *receivedMsg.ExpiresAt, 5*time.Second)
+}
+
+func TestHandlePush_WithoutTTL(t *testing.T) {
+	var receivedMsg *model.Message
+	handler := func(msg *model.Message) error {
+		receivedMsg = msg
+		return nil
+	}
+	testHandler := func(msg *model.Message) error { return nil }
+
+	router := setupPushRouter(handler, testHandler)
+
+	body := PushRequest{
+		Title: "No TTL",
+		Body:  "Never expires",
+	}
+	jsonBody, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/push", bytes.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.NotNil(t, receivedMsg)
+	assert.Nil(t, receivedMsg.ExpiresAt, "ExpiresAt should be nil when TTL is not provided")
+}
+
+func TestHandlePush_WithInvalidTTL(t *testing.T) {
+	handler := func(msg *model.Message) error { return nil }
+	testHandler := func(msg *model.Message) error { return nil }
+
+	router := setupPushRouter(handler, testHandler)
+
+	body := PushRequest{
+		Title: "Bad TTL",
+		Body:  "Invalid duration",
+		TTL:   "not-a-duration",
+	}
+	jsonBody, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/push", bytes.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var resp map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &resp)
+	assert.NoError(t, err)
+	assert.Equal(t, float64(400), resp["code"])
+	assert.Contains(t, resp["message"], "invalid ttl")
+}
+
+func TestHandlePush_WithTTLTooShort(t *testing.T) {
+	handler := func(msg *model.Message) error { return nil }
+	testHandler := func(msg *model.Message) error { return nil }
+
+	router := setupPushRouter(handler, testHandler)
+
+	body := PushRequest{
+		Title: "Short TTL",
+		Body:  "Too short",
+		TTL:   "30s",
+	}
+	jsonBody, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/push", bytes.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var resp map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &resp)
+	assert.NoError(t, err)
+	assert.Equal(t, float64(400), resp["code"])
+	assert.Contains(t, resp["message"], "invalid ttl")
+}
+
+func TestHandlePush_WithTTLTooLong(t *testing.T) {
+	handler := func(msg *model.Message) error { return nil }
+	testHandler := func(msg *model.Message) error { return nil }
+
+	router := setupPushRouter(handler, testHandler)
+
+	body := PushRequest{
+		Title: "Long TTL",
+		Body:  "Too long",
+		TTL:   "800h",
+	}
+	jsonBody, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/push", bytes.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var resp map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &resp)
+	assert.NoError(t, err)
+	assert.Equal(t, float64(400), resp["code"])
+	assert.Contains(t, resp["message"], "invalid ttl")
+}
+
+func TestHandleTestPush_WithValidTTL(t *testing.T) {
+	var receivedMsg *model.Message
+	handler := func(msg *model.Message) error { return nil }
+	testHandler := func(msg *model.Message) error {
+		receivedMsg = msg
+		return nil
+	}
+
+	router := setupPushRouter(handler, testHandler)
+
+	body := PushRequest{
+		Title: "Test TTL",
+		Body:  "Expires in 1 hour",
+		TTL:   "1h",
+	}
+	jsonBody, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/push/test", bytes.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.NotNil(t, receivedMsg)
+	assert.NotNil(t, receivedMsg.ExpiresAt, "ExpiresAt should be set when TTL is provided")
+	assert.WithinDuration(t, receivedMsg.ReceivedAt.Add(1*time.Hour), *receivedMsg.ExpiresAt, 5*time.Second)
+}
+
+func TestHandleTestPush_WithInvalidTTL(t *testing.T) {
+	handler := func(msg *model.Message) error { return nil }
+	testHandler := func(msg *model.Message) error { return nil }
+
+	router := setupPushRouter(handler, testHandler)
+
+	body := PushRequest{
+		Title: "Bad TTL",
+		Body:  "Invalid",
+		TTL:   "xyz",
+	}
+	jsonBody, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/push/test", bytes.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	var resp map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &resp)
+	assert.NoError(t, err)
+	assert.Equal(t, float64(400), resp["code"])
+	assert.Contains(t, resp["message"], "invalid ttl")
 }
