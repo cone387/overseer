@@ -29,9 +29,10 @@ func (n *Notifier) IsMuted() bool {
 }
 
 // ShowRich displays a notification with rich metadata (channel, source, level).
+// msgID is the message ID used for ack/snooze actions (can be empty for non-actionable notifications).
 // Platform-specific implementations handle the actual display.
 // Falls back to Show() on platforms that don't support rich notifications.
-func (n *Notifier) ShowRich(title, body, clickURL, channel, source, level string) {
+func (n *Notifier) ShowRich(title, body, clickURL, channel, source, level, msgID string) {
 	// Build enriched body with source/channel info
 	enrichedBody := body
 	if source != "" && channel != "" {
@@ -40,5 +41,5 @@ func (n *Notifier) ShowRich(title, body, clickURL, channel, source, level string
 		enrichedBody = "[" + channel + "] " + body
 	}
 
-	n.showWithLevel(title, enrichedBody, clickURL, level)
+	n.showWithLevel(title, enrichedBody, clickURL, level, msgID)
 }

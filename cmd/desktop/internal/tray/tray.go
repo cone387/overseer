@@ -4,6 +4,8 @@ import (
 	"log"
 	"os/exec"
 	"runtime"
+	"sync"
+	"time"
 
 	"github.com/getlantern/systray"
 	"github.com/overseer/overseer/cmd/desktop/internal/autostart"
@@ -21,11 +23,37 @@ type Tray struct {
 	ws       *wsclient.Client
 	notifier *notifier.Notifier
 	cache    *cache.Cache
+
+	// Flashing state
+	unreadCh chan int
+	flashing bool
+	flashMu  sync.Mutex
 }
 
 // New creates a new Tray instance.
 func New(cfg *config.Config, ws *wsclient.Client, n *notifier.Notifier, c *cache.Cache) *Tray {
-	return &Tray{cfg: cfg, ws: ws, notifier: n, cache: c}
+	return &Tray{
+		cfg:      cfg,
+		ws:       ws,
+		notifier: n,
+		cache:    c,
+		unreadCh: make(chan int, 1),
+	}
+}
+
+// UpdateUnread is called by the unread tracker when the unread count changes.
+// This triggers the tray icon to start or stop flashing.
+func (t *Tray) UpdateUnread(count int) {
+	select {
+	case t.unreadCh <- count:
+	default:
+		// Non-blocking: replace the pending value if channel is full
+		select {
+		case <-t.unreadCh:
+		default:
+		}
+		t.unreadCh <- count
+	}
 }
 
 // Run starts the system tray. This blocks until Quit is called.
@@ -42,6 +70,17 @@ func (t *Tray) onReady() {
 	systray.SetTitle("Overseer")
 	systray.SetTooltip("Overseer - " + t.cfg.DeviceName)
 	systray.SetIcon(iconData)
+
+	// Start tray icon flash goroutine
+	go t.runFlashLoop()
+
+	// Check initial unread count on startup
+	if t.cache != nil {
+		count, err := t.cache.UnreadCount()
+		if err == nil && count > 0 {
+			t.UpdateUnread(count)
+		}
+	}
 
 	// Status
 	mStatus := systray.AddMenuItem(locale.T("tray.connected"), "")
@@ -191,6 +230,42 @@ func (t *Tray) onReady() {
 
 func (t *Tray) onExit() {
 	log.Println("[tray] exiting")
+}
+
+// runFlashLoop manages the tray icon flashing state.
+// It listens for unread count updates and alternates the icon when flashing.
+func (t *Tray) runFlashLoop() {
+	flashTicker := time.NewTicker(500 * time.Millisecond)
+	defer flashTicker.Stop()
+
+	showNormal := true
+
+	for {
+		select {
+		case count := <-t.unreadCh:
+			t.flashMu.Lock()
+			if count > 0 {
+				t.flashing = true
+			} else {
+				t.flashing = false
+				systray.SetIcon(iconData)
+				showNormal = true
+			}
+			t.flashMu.Unlock()
+
+		case <-flashTicker.C:
+			t.flashMu.Lock()
+			if t.flashing {
+				if showNormal {
+					systray.SetIcon(iconHighlightData)
+				} else {
+					systray.SetIcon(iconData)
+				}
+				showNormal = !showNormal
+			}
+			t.flashMu.Unlock()
+		}
+	}
 }
 
 func (t *Tray) openBrowser(url string) {

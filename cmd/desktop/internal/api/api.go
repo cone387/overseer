@@ -9,6 +9,47 @@ import (
 	"time"
 )
 
+// PostWithRetry sends a POST request with exponential backoff retry (max 3 attempts).
+// Delays follow: 1s, 2s, 4s (base * 2^i).
+func PostWithRetry(url string, body []byte) error {
+	backoff := time.Second
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		var reqBody io.Reader
+		if body != nil {
+			reqBody = bytes.NewReader(body)
+		}
+		resp, err := httpClient.Post(url, "application/json", reqBody)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+				return nil
+			}
+			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
+		} else {
+			lastErr = err
+		}
+		if attempt < 2 {
+			time.Sleep(backoff)
+			backoff *= 2
+		}
+	}
+	return fmt.Errorf("request failed after 3 attempts: %w", lastErr)
+}
+
+// AckMessage sends an acknowledgment for a message with retry.
+func AckMessage(baseURL, messageID string) error {
+	url := baseURL + "/api/messages/" + messageID + "/ack"
+	return PostWithRetry(url, nil)
+}
+
+// SnoozeMessage sends a snooze request for a message with retry.
+func SnoozeMessage(baseURL, messageID, duration string) error {
+	url := baseURL + "/api/messages/" + messageID + "/snooze"
+	body, _ := json.Marshal(map[string]string{"duration": duration})
+	return PostWithRetry(url, body)
+}
+
 // Device represents the response from the desktop registration endpoint.
 type Device struct {
 	ID        string `json:"id"`

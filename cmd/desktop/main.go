@@ -14,6 +14,7 @@ import (
 	"github.com/overseer/overseer/cmd/desktop/internal/notifier"
 	"github.com/overseer/overseer/cmd/desktop/internal/setup"
 	"github.com/overseer/overseer/cmd/desktop/internal/tray"
+	"github.com/overseer/overseer/cmd/desktop/internal/unread"
 	"github.com/overseer/overseer/cmd/desktop/internal/updater"
 	"github.com/overseer/overseer/cmd/desktop/internal/wsclient"
 )
@@ -84,6 +85,9 @@ func main() {
 	// Create notifier
 	n := notifier.New(cfg.ServerURL)
 
+	// Declare tracker (initialized after tray creation)
+	var tracker *unread.Tracker
+
 	// Create WebSocket client
 	ws := wsclient.New(cfg.ServerURL, cfg.APIKey, func(event wsclient.PushEvent) {
 		log.Printf("[desktop] notification: [%s] %s - %s", event.Channel, event.Title, event.Body)
@@ -98,11 +102,17 @@ func main() {
 				Channel:    event.Channel,
 				Source:     event.Source,
 				ReceivedAt: time.Now(),
+				Unread:     true,
 			})
 		}
 
+		// Update unread tracker
+		if tracker != nil {
+			tracker.OnPush(event.ID)
+		}
+
 		// Show notification (respects mute)
-		n.ShowRich(event.Title, event.Body, event.URL, event.Channel, event.Source, event.Level)
+		n.ShowRich(event.Title, event.Body, event.URL, event.Channel, event.Source, event.Level, event.ID)
 	})
 
 	// Handle auth failure (401) — clear config and re-register
@@ -136,6 +146,15 @@ func main() {
 
 	// Run system tray (blocks)
 	t := tray.New(cfg, ws, n, notifCache)
+
+	// Create unread tracker
+	tracker = unread.New(notifCache, t.UpdateUnread)
+
+	// Wire ack_sync events to tracker
+	ws.SetOnAckSync(func(messageID string) {
+		tracker.OnAckSync(messageID)
+	})
+
 	t.Run()
 
 	// Cleanup

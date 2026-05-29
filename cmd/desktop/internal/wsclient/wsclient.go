@@ -34,6 +34,9 @@ type wsEvent struct {
 // OnPushFunc is the callback invoked when a push event is received.
 type OnPushFunc func(event PushEvent)
 
+// OnAckSyncFunc is the callback invoked when an ack_sync event is received.
+type OnAckSyncFunc func(messageID string)
+
 // OnAuthFailFunc is the callback invoked when WebSocket auth fails (401).
 type OnAuthFailFunc func()
 
@@ -42,6 +45,7 @@ type Client struct {
 	serverURL  string
 	apiKey     string
 	onPush     OnPushFunc
+	onAckSync  OnAckSyncFunc
 	onAuthFail OnAuthFailFunc
 
 	conn   *websocket.Conn
@@ -65,6 +69,13 @@ func (c *Client) SetOnAuthFail(fn OnAuthFailFunc) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.onAuthFail = fn
+}
+
+// SetOnAckSync sets the callback for ack_sync events.
+func (c *Client) SetOnAckSync(fn OnAckSyncFunc) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onAckSync = fn
 }
 
 // Connected returns true if the WebSocket connection is active.
@@ -222,6 +233,20 @@ func (c *Client) readLoop() {
 			}
 			if c.onPush != nil {
 				c.onPush(push)
+			}
+		} else if event.Type == "ack_sync" {
+			var ackPayload struct {
+				MessageID string `json:"message_id"`
+			}
+			if err := json.Unmarshal(event.Payload, &ackPayload); err != nil {
+				log.Printf("[ws] failed to parse ack_sync payload: %v", err)
+				continue
+			}
+			c.mu.Lock()
+			fn := c.onAckSync
+			c.mu.Unlock()
+			if fn != nil {
+				fn(ackPayload.MessageID)
 			}
 		}
 	}

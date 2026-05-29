@@ -23,11 +23,11 @@ var (
 
 // Show displays a basic toast notification.
 func (n *Notifier) Show(title, body, clickURL string) {
-	n.showWithLevel(title, body, clickURL, "default")
+	n.showWithLevel(title, body, clickURL, "default", "")
 }
 
-// showWithLevel displays a toast with level-appropriate audio.
-func (n *Notifier) showWithLevel(title, body, clickURL, level string) {
+// showWithLevel displays a toast with level-appropriate audio and optional action buttons.
+func (n *Notifier) showWithLevel(title, body, clickURL, level, msgID string) {
 	n.mu.Lock()
 	muted := n.muted
 	n.mu.Unlock()
@@ -53,6 +53,15 @@ func (n *Notifier) showWithLevel(title, body, clickURL, level string) {
 		Message:             body,
 		ActivationType:      "protocol",
 		ActivationArguments: clickURL,
+	}
+
+	// Add action buttons when message ID is available
+	if msgID != "" {
+		notification.Actions = []toast.Action{
+			{Type: "protocol", Label: "确认", Arguments: n.serverURL + "/api/messages/" + msgID + "/ack-web"},
+			{Type: "protocol", Label: "稍后", Arguments: n.serverURL + "/api/messages/" + msgID + "/snooze-web"},
+			{Type: "protocol", Label: "打开", Arguments: clickURL},
+		}
 	}
 
 	switch level {

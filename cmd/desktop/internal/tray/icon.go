@@ -8,25 +8,26 @@ import (
 	"image/png"
 )
 
-// iconData is a 16x16 PNG icon for the system tray.
-var iconData = generateIcon()
+// iconData is a 16x16 PNG icon for the system tray (blue).
+var iconData = generateIcon(color.RGBA{R: 66, G: 133, B: 244, A: 255})
 
-func generateIcon() []byte {
-	// Create a 16x16 image with a blue circle-ish shape
+// iconHighlightData is a 16x16 PNG icon for the flashing state (red/orange).
+var iconHighlightData = generateIcon(color.RGBA{R: 234, G: 67, B: 53, A: 255})
+
+func generateIcon(fillColor color.RGBA) []byte {
+	// Create a 16x16 image with a circle shape
 	img := image.NewRGBA(image.Rect(0, 0, 16, 16))
 
-	// Fill with a nice blue color
-	blue := color.RGBA{R: 66, G: 133, B: 244, A: 255}
 	white := color.RGBA{R: 255, G: 255, B: 255, A: 255}
 
-	// Draw a filled blue square with rounded-ish corners
+	// Draw a filled circle
 	for y := 0; y < 16; y++ {
 		for x := 0; x < 16; x++ {
 			// Simple circle approximation
 			dx := float64(x) - 7.5
 			dy := float64(y) - 7.5
 			if dx*dx+dy*dy <= 49 { // radius ~7
-				img.Set(x, y, blue)
+				img.Set(x, y, fillColor)
 			}
 		}
 	}
@@ -52,6 +53,7 @@ func generateIcon() []byte {
 func init() {
 	// Convert PNG to ICO format for Windows compatibility
 	iconData = pngToICO(iconData)
+	iconHighlightData = pngToICO(iconHighlightData)
 }
 
 // pngToICO wraps a PNG image in a minimal ICO container.

@@ -106,8 +106,8 @@ This plan implements the full notification lifecycle feature in two phases. Phas
 - [~] 6. Checkpoint — Phase 1 Backend
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 7. Phase 1 — Desktop Client: Unread State & Cache
-  - [~] 7.1 Extend local SQLite cache schema with lifecycle columns
+- [x] 7. Phase 1 — Desktop Client: Unread State & Cache
+  - [x] 7.1 Extend local SQLite cache schema with lifecycle columns
     - Add `unread`, `acked_at`, `expires_at` columns to notifications table in `cmd/desktop/internal/cache/cache.go`
     - Implement `MarkRead`, `MarkAllRead`, `UnreadCount`, `MarkAckSynced`, `GetUnexpiredUnread` methods
     - _Requirements: 1.1, 1.4_
@@ -116,7 +116,7 @@ This plan implements the full notification lifecycle feature in two phases. Phas
     - **Property 1: Unread state persistence round-trip**
     - **Validates: Requirements 1.4**
 
-  - [~] 7.3 Implement Unread Tracker component
+  - [x] 7.3 Implement Unread Tracker component
     - Create `cmd/desktop/internal/unread/tracker.go`
     - Implement `OnPush`, `OnRead`, `OnReadAll`, `OnAckSync`, `OnExpired`, `ShouldFlash`
     - Coordinate between cache state and tray icon controller via callback
@@ -126,21 +126,21 @@ This plan implements the full notification lifecycle feature in two phases. Phas
     - **Property 2: Tray icon flashing reflects unread count**
     - **Validates: Requirements 2.1, 2.2, 11.3**
 
-- [ ] 8. Phase 1 — Desktop Client: Tray Icon Flashing
-  - [~] 8.1 Implement tray icon flashing in tray controller
+- [x] 8. Phase 1 — Desktop Client: Tray Icon Flashing
+  - [x] 8.1 Implement tray icon flashing in tray controller
     - Modify `cmd/desktop/internal/tray/tray.go` to alternate between normal and highlighted icon at 500ms interval when unread > 0
     - Stop flashing and show static icon when all read
     - Start flashing on app launch if existing unread notifications in cache
     - _Requirements: 2.1, 2.2, 2.3_
 
-- [ ] 9. Phase 1 — Desktop Client: Toast Action Buttons
-  - [~] 9.1 Add "确认" (Ack) and "稍后" (Snooze) buttons to toast notifications
+- [x] 9. Phase 1 — Desktop Client: Toast Action Buttons
+  - [x] 9.1 Add "确认" (Ack) and "稍后" (Snooze) buttons to toast notifications
     - Modify `cmd/desktop/internal/notifier/notifier_windows.go` to include action buttons
     - Handle ack button click: POST `/api/messages/:id/ack` with retry
     - Handle snooze button click: POST `/api/messages/:id/snooze` with duration="1h" and retry
     - _Requirements: 3.1, 3.2, 8.1, 8.2_
 
-  - [~] 9.2 Implement exponential backoff retry for ack/snooze POST requests
+  - [x] 9.2 Implement exponential backoff retry for ack/snooze POST requests
     - Create retry helper in `cmd/desktop/internal/api/api.go`
     - Retry with delays: 1s, 2s, 4s (base * 2^(i-1)), max 3 attempts
     - _Requirements: 3.3, 8.3_
@@ -149,8 +149,8 @@ This plan implements the full notification lifecycle feature in two phases. Phas
     - **Property 3: Exponential backoff retry**
     - **Validates: Requirements 3.3, 8.3**
 
-- [ ] 10. Phase 1 — Desktop Client: Wire Unread Tracker to WS Client
-  - [~] 10.1 Integrate unread tracker with WebSocket client event handling
+- [x] 10. Phase 1 — Desktop Client: Wire Unread Tracker to WS Client
+  - [x] 10.1 Integrate unread tracker with WebSocket client event handling
     - Modify `cmd/desktop/internal/wsclient/wsclient.go` to call tracker.OnPush on push events
     - Call tracker.OnRead when toast is interacted with
     - Call tracker.OnReadAll when tray icon is clicked

@@ -9,10 +9,10 @@ import (
 
 // Show displays a basic Linux notification.
 func (n *Notifier) Show(title, body, clickURL string) {
-	n.showWithLevel(title, body, clickURL, "default")
+	n.showWithLevel(title, body, clickURL, "default", "")
 }
 
-func (n *Notifier) showWithLevel(title, body, clickURL, level string) {
+func (n *Notifier) showWithLevel(title, body, clickURL, level, msgID string) {
 	n.mu.Lock()
 	muted := n.muted
 	n.mu.Unlock()
