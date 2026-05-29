@@ -1,4 +1,5 @@
 mod api;
+mod autostart;
 mod cache;
 mod config;
 mod grouper;
@@ -33,6 +34,7 @@ pub struct AppState {
 /// Register device with the server (called from frontend setup page).
 #[tauri::command]
 async fn register_device(
+    app_handle: AppHandle,
     server_url: String,
     token: String,
     device_name: String,
@@ -52,6 +54,11 @@ async fn register_device(
     cfg.device_id = device.id.clone();
     cfg.device_name = device.name.clone();
     cfg.save()?;
+
+    // Auto-start WS connection after registration
+    let cfg_clone = cfg.clone();
+    drop(cfg);
+    start_ws_client(app_handle, cfg_clone);
 
     Ok(device.name)
 }
@@ -107,6 +114,35 @@ async fn toggle_mute(state: tauri::State<'_, AppState>) -> Result<bool, String> 
     Ok(*muted)
 }
 
+/// Acknowledge a message.
+#[tauri::command]
+async fn ack_message(message_id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let cfg = state.config.lock().await;
+    let base_url = cfg.server_url.clone();
+    drop(cfg);
+    api::ack_message(&base_url, &message_id).await?;
+    if let Some(ref c) = *state.cache {
+        let _ = c.mark_read(&message_id);
+    }
+    Ok(())
+}
+
+/// Get autostart status.
+#[tauri::command]
+fn get_autostart_enabled() -> bool {
+    autostart::is_enabled()
+}
+
+/// Toggle autostart.
+#[tauri::command]
+fn set_autostart(enabled: bool) -> Result<(), String> {
+    if enabled {
+        autostart::enable()
+    } else {
+        autostart::disable()
+    }
+}
+
 // ─── App Setup ────────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -135,6 +171,9 @@ pub fn run() {
             mark_all_read,
             is_connected,
             toggle_mute,
+            ack_message,
+            get_autostart_enabled,
+            set_autostart,
         ])
         .on_window_event(|window, event| {
             // Hide window instead of closing — keep running in tray
@@ -194,6 +233,15 @@ pub fn run() {
                             info!("[tray] mute toggled: {}", *muted);
                         }
                         _ => {}
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let tauri::tray::TrayIconEvent::DoubleClick { .. } = event {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
                     }
                 })
                 .build(app)?;

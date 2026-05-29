@@ -21,13 +21,16 @@ interface Notification {
   unread: boolean;
 }
 
+type Page = "loading" | "setup" | "main" | "settings";
+
 function App() {
-  const [page, setPage] = useState<"loading" | "setup" | "main">("loading");
+  const [page, setPage] = useState<Page>("loading");
   const [config, setConfig] = useState<Config | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [wsStatus, setWsStatus] = useState("disconnected");
   const [error, setError] = useState("");
+  const [autostart, setAutostart] = useState(false);
 
   // Setup form state
   const [serverUrl, setServerUrl] = useState("http://localhost:9721");
@@ -46,6 +49,9 @@ function App() {
         setPage("setup");
       }
     });
+
+    // Load autostart state
+    invoke<boolean>("get_autostart_enabled").then(setAutostart);
 
     // Listen for events from Rust backend
     const unlisten1 = listen<string>("ws-status", (event) => {
@@ -86,17 +92,16 @@ function App() {
     setError("");
     setRegistering(true);
     try {
-      const name = await invoke<string>("register_device", {
+      await invoke<string>("register_device", {
         serverUrl,
         token,
         deviceName,
       });
-      // Reload config
       const cfg = await invoke<Config>("get_config");
       setConfig(cfg);
       setPage("main");
-      // Restart needed to connect WS - for now just show success
       setWsStatus("connected");
+      loadNotifications();
     } catch (e: any) {
       setError(typeof e === "string" ? e : e.message || "注册失败");
     } finally {
@@ -110,15 +115,31 @@ function App() {
     loadNotifications();
   };
 
-  // ─── Setup Page ───────────────────────────────────────────────────────────
+  const handleAck = async (id: string) => {
+    try {
+      await invoke("ack_message", { messageId: id });
+      loadNotifications();
+    } catch (e) {
+      console.error("ack failed:", e);
+    }
+  };
+
+  const handleToggleAutostart = async () => {
+    const newVal = !autostart;
+    try {
+      await invoke("set_autostart", { enabled: newVal });
+      setAutostart(newVal);
+    } catch (e) {
+      console.error("autostart toggle failed:", e);
+    }
+  };
+
+  // ─── Loading ──────────────────────────────────────────────────────────────
   if (page === "loading") {
-    return (
-      <main className="container">
-        <p>加载中...</p>
-      </main>
-    );
+    return <main className="container"><p>加载中...</p></main>;
   }
 
+  // ─── Setup Page ───────────────────────────────────────────────────────────
   if (page === "setup") {
     return (
       <main className="container">
@@ -164,16 +185,74 @@ function App() {
     );
   }
 
+  // ─── Settings Page ────────────────────────────────────────────────────────
+  if (page === "settings") {
+    return (
+      <main className="container">
+        <div className="header">
+          <h1>设置</h1>
+          <button className="btn-small btn-back" onClick={() => setPage("main")}>
+            ← 返回
+          </button>
+        </div>
+
+        <div className="settings-section">
+          <div className="setting-item">
+            <span className="setting-label">服务器地址</span>
+            <span className="setting-value">{config?.server_url}</span>
+          </div>
+          <div className="setting-item">
+            <span className="setting-label">设备名称</span>
+            <span className="setting-value">{config?.device_name}</span>
+          </div>
+          <div className="setting-item">
+            <span className="setting-label">设备 ID</span>
+            <span className="setting-value mono">{config?.device_id}</span>
+          </div>
+          <div className="setting-item">
+            <span className="setting-label">开机自启</span>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={autostart}
+                onChange={handleToggleAutostart}
+              />
+              <span className="toggle-slider" />
+            </label>
+          </div>
+        </div>
+
+        <div className="settings-actions">
+          <button
+            className="btn-danger"
+            onClick={() => {
+              setPage("setup");
+              setServerUrl(config?.server_url || "http://localhost:9721");
+            }}
+          >
+            重新注册
+          </button>
+        </div>
+      </main>
+    );
+  }
+
   // ─── Main Page ────────────────────────────────────────────────────────────
   return (
     <main className="container">
       <div className="header">
         <h1>Overseer Desktop</h1>
-        <div className="status">
-          <span className={`dot ${wsStatus === "connected" ? "green" : "red"}`} />
-          <span>{wsStatus === "connected" ? "已连接" : "已断开"}</span>
-          {config && <span className="device-name">{config.device_name}</span>}
+        <div className="header-actions">
+          <button className="btn-icon" onClick={() => setPage("settings")} title="设置">
+            ⚙️
+          </button>
         </div>
+      </div>
+
+      <div className="status">
+        <span className={`dot ${wsStatus === "connected" ? "green" : "red"}`} />
+        <span>{wsStatus === "connected" ? "已连接" : "已断开"}</span>
+        {config && <span className="device-name">{config.device_name}</span>}
       </div>
 
       <div className="toolbar">
@@ -195,6 +274,7 @@ function App() {
             <div
               key={n.id}
               className={`notification-item ${n.unread ? "unread" : ""}`}
+              onClick={() => n.unread && handleAck(n.id)}
             >
               <div className="notification-header">
                 <span className="channel">[{n.channel || "default"}]</span>

@@ -102,7 +102,10 @@ button:disabled {
 
 /* Header */
 .header {
-  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
 }
 
 .status {
@@ -201,4 +204,110 @@ button:disabled {
   color: var(--text-muted);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Settings */
+.settings-section {
+  margin: 16px 0;
+}
+
+.setting-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.setting-label {
+  font-size: 14px;
+}
+
+.setting-value {
+  font-size: 13px;
+  color: var(--text-muted);
+  max-width: 60%;
+  text-align: right;
+  word-break: break-all;
+}
+
+.setting-value.mono {
+  font-family: monospace;
+  font-size: 11px;
+}
+
+.settings-actions {
+  margin-top: 24px;
+}
+
+.btn-danger {
+  background: var(--danger);
+}
+
+.btn-back {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  width: auto;
+  padding: 6px 12px;
+}
+
+.btn-icon {
+  background: transparent;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  width: auto;
+  padding: 4px 8px;
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Toggle switch */
+.toggle {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+}
+
+.toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--border);
+  border-radius: 22px;
+  transition: 0.3s;
+}
+
+.toggle-slider::before {
+  content: "";
+  position: absolute;
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  bottom: 3px;
+  background: white;
+  border-radius: 50%;
+  transition: 0.3s;
+}
+
+.toggle input:checked + .toggle-slider {
+  background: var(--accent);
+}
+
+.toggle input:checked + .toggle-slider::before {
+  transform: translateX(18px);
 }
