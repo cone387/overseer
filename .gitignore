@@ -34,3 +34,5 @@ data/
 overseer.db
 overseer.db-shm
 overseer.db-wal
+overseer
+overseer.db
