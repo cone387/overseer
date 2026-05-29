@@ -94,6 +94,13 @@ func main() {
 
 		// Cache the notification
 		if notifCache != nil {
+			var expiresAt *time.Time
+			if event.ExpiresAt != "" {
+				if t, err := time.Parse(time.RFC3339, event.ExpiresAt); err == nil {
+					expiresAt = &t
+				}
+			}
+
 			_ = notifCache.Add(cache.Entry{
 				ID:         event.ID,
 				Title:      event.Title,
@@ -103,6 +110,7 @@ func main() {
 				Source:     event.Source,
 				ReceivedAt: time.Now(),
 				Unread:     true,
+				ExpiresAt:  expiresAt,
 			})
 		}
 

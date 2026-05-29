@@ -200,6 +200,7 @@ export interface Message {
   fail_reason?: string
   received_at: string
   pushed_at?: string
+  ack_at?: string
 }
 
 export interface MessageFilter {

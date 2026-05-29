@@ -13,16 +13,17 @@ import (
 
 // PushEvent represents a push notification received via WebSocket.
 type PushEvent struct {
-	ID      string `json:"id"`
-	Source  string `json:"source"`
-	Channel string `json:"channel"`
-	Title   string `json:"title"`
-	Body    string `json:"body"`
-	URL     string `json:"url"`
-	Icon    string `json:"icon"`
-	Level   string `json:"level"`
-	Status  string `json:"status"`
-	Time    string `json:"time"`
+	ID        string `json:"id"`
+	Source    string `json:"source"`
+	Channel   string `json:"channel"`
+	Title     string `json:"title"`
+	Body      string `json:"body"`
+	URL       string `json:"url"`
+	Icon      string `json:"icon"`
+	Level     string `json:"level"`
+	Status    string `json:"status"`
+	Time      string `json:"time"`
+	ExpiresAt string `json:"expires_at"`
 }
 
 // wsEvent is the raw WebSocket event envelope.

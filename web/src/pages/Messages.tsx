@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { fetchMessages, fetchChannels, Message, MessageFilter, Channel } from '../api'
+import { MessageAckBadge } from '../components/MessageAckBadge'
 import './Pages.css'
 
 type TimeRange = '1h' | '24h' | '7d' | '30d' | 'custom'
@@ -201,13 +202,14 @@ function Messages() {
               <th>频道</th>
               <th>标题</th>
               <th>状态</th>
+              <th>确认</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={5} className="table-empty">加载中...</td></tr>
+              <tr><td colSpan={6} className="table-empty">加载中...</td></tr>
             ) : messages.length === 0 ? (
-              <tr><td colSpan={5} className="table-empty">暂无推送记录</td></tr>
+              <tr><td colSpan={6} className="table-empty">暂无推送记录</td></tr>
             ) : (
               messages.map((msg) => (
                 <tr key={msg.id}>
@@ -219,6 +221,9 @@ function Messages() {
                     <span className={`status-badge ${getStatusClass(msg.status)}`}>
                       {msg.status}
                     </span>
+                  </td>
+                  <td>
+                    <MessageAckBadge ackAt={msg.ack_at} />
                   </td>
                 </tr>
               ))
