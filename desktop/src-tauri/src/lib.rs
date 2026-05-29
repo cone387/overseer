@@ -202,7 +202,7 @@ pub fn run() {
                 .item(&quit)
                 .build()?;
 
-            let _tray = TrayIconBuilder::new()
+            let _tray = TrayIconBuilder::with_id("main")
                 .tooltip("Overseer Desktop")
                 .menu(&menu)
                 .on_menu_event(move |app, event| {
@@ -347,10 +347,11 @@ fn start_ws_client(handle: AppHandle, cfg: Config) {
                         });
                     }
 
-                    // Emit unread count update
+                    // Emit unread count update + update tray
                     if let Some(ref c) = *cache {
                         if let Ok(count) = c.unread_count() {
                             let _ = handle_events.emit("unread-count", count);
+                            update_tray_tooltip(&handle_events, count);
                         }
                     }
 
@@ -370,6 +371,7 @@ fn start_ws_client(handle: AppHandle, cfg: Config) {
                         let _ = c.mark_ack_synced(&message_id);
                         if let Ok(count) = c.unread_count() {
                             let _ = handle_events.emit("unread-count", count);
+                            update_tray_tooltip(&handle_events, count);
                         }
                     }
                 }
@@ -414,4 +416,26 @@ fn start_ws_client(handle: AppHandle, cfg: Config) {
         cfg.last_update_check = Some(Utc::now());
         let _ = cfg.save();
     });
+}
+
+/// Update tray icon tooltip to show unread count.
+fn update_tray_tooltip(handle: &AppHandle, unread_count: i32) {
+    if let Some(tray) = handle.tray_by_id("main") {
+        let tooltip = if unread_count > 0 {
+            format!("Overseer Desktop ({} 未读)", unread_count)
+        } else {
+            "Overseer Desktop".to_string()
+        };
+        let _ = tray.set_tooltip(Some(&tooltip));
+        // On macOS, set title to show badge number next to tray icon
+        #[cfg(target_os = "macos")]
+        {
+            let title = if unread_count > 0 {
+                Some(format!("{}", unread_count))
+            } else {
+                None
+            };
+            let _ = tray.set_title(title.as_deref());
+        }
+    }
 }
