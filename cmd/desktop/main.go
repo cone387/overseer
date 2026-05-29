@@ -10,6 +10,7 @@ import (
 	"github.com/overseer/overseer/cmd/desktop/internal/api"
 	"github.com/overseer/overseer/cmd/desktop/internal/cache"
 	"github.com/overseer/overseer/cmd/desktop/internal/config"
+	"github.com/overseer/overseer/cmd/desktop/internal/grouper"
 	"github.com/overseer/overseer/cmd/desktop/internal/locale"
 	"github.com/overseer/overseer/cmd/desktop/internal/notifier"
 	"github.com/overseer/overseer/cmd/desktop/internal/setup"
@@ -85,6 +86,11 @@ func main() {
 	// Create notifier
 	n := notifier.New(cfg.ServerURL)
 
+	// Create message grouper (batches rapid notifications from same source)
+	msgGrouper := grouper.New(func(title, body, url, channel, source, level, msgID string) {
+		n.ShowRich(title, body, url, channel, source, level, msgID)
+	})
+
 	// Declare tracker (initialized after tray creation)
 	var tracker *unread.Tracker
 
@@ -119,8 +125,16 @@ func main() {
 			tracker.OnPush(event.ID)
 		}
 
-		// Show notification (respects mute)
-		n.ShowRich(event.Title, event.Body, event.URL, event.Channel, event.Source, event.Level, event.ID)
+		// Route through grouper (groups rapid notifications from same source)
+		msgGrouper.Ingest(grouper.PushEvent{
+			ID:      event.ID,
+			Source:  event.Source,
+			Channel: event.Channel,
+			Title:   event.Title,
+			Body:    event.Body,
+			URL:     event.URL,
+			Level:   event.Level,
+		})
 	})
 
 	// Handle auth failure (401) — clear config and re-register
