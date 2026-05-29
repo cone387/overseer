@@ -43,7 +43,7 @@ body {
 .container {
   padding: 32px;
   height: 100vh;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .container.center {

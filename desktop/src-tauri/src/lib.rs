@@ -164,7 +164,7 @@ fn set_autostart(enabled: bool) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    env_logger::init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let cfg = Config::load();
     let notification_cache = Cache::new().ok();
@@ -297,11 +297,11 @@ fn start_ws_client(handle: AppHandle, cfg: Config) {
     let handle_clone = handle.clone();
     let muted_clone = muted.clone();
     let show_fn: grouper::ShowFn = Arc::new(move |title, body, _url, channel, _source, _level, _msg_id| {
-        let is_muted = muted_clone.blocking_lock();
-        if *is_muted {
-            return;
+        if let Ok(is_muted) = muted_clone.try_lock() {
+            if *is_muted {
+                return;
+            }
         }
-        drop(is_muted);
 
         // Emit to frontend
         let _ = handle_clone.emit("notification", serde_json::json!({
