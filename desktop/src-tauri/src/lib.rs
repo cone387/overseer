@@ -204,6 +204,8 @@ pub fn run() {
 
             let _tray = TrayIconBuilder::with_id("main")
                 .tooltip("Overseer Desktop")
+                .icon(tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png")).expect("load tray icon"))
+                .icon_as_template(false)
                 .menu(&menu)
                 .on_menu_event(move |app, event| {
                     match event.id().as_ref() {
