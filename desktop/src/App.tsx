@@ -33,11 +33,15 @@ function App() {
   const [autostart, setAutostart] = useState(false);
   const [activeChannel, setActiveChannel] = useState<string>("all");
 
-  // Setup form state
+  // Setup form
   const [serverUrl, setServerUrl] = useState("http://localhost:9721");
   const [token, setToken] = useState("");
   const [deviceName, setDeviceName] = useState("");
   const [registering, setRegistering] = useState(false);
+
+  // Settings form
+  const [editingUrl, setEditingUrl] = useState("");
+  const [savingUrl, setSavingUrl] = useState(false);
 
   useEffect(() => {
     invoke<Config>("get_config").then((cfg) => {
@@ -45,6 +49,10 @@ function App() {
       if (cfg.server_url && cfg.api_key) {
         setPage("main");
         loadNotifications();
+        // Query actual connection status
+        invoke<boolean>("is_connected").then((connected) => {
+          setWsStatus(connected ? "connected" : "disconnected");
+        });
       } else {
         setPage("setup");
       }
@@ -82,7 +90,6 @@ function App() {
     }
   };
 
-  // Group notifications by channel
   const channels = useMemo(() => {
     const map: Record<string, { count: number; unread: number }> = {};
     for (const n of notifications) {
@@ -145,9 +152,24 @@ function App() {
     }
   };
 
+  const handleSaveUrl = async () => {
+    if (!editingUrl) return;
+    setSavingUrl(true);
+    try {
+      await invoke("update_server_url", { serverUrl: editingUrl });
+      const cfg = await invoke<Config>("get_config");
+      setConfig(cfg);
+      setWsStatus("connected");
+    } catch (e: any) {
+      console.error("update url failed:", e);
+    } finally {
+      setSavingUrl(false);
+    }
+  };
+
   // ─── Loading ──────────────────────────────────────────────────────────────
   if (page === "loading") {
-    return <main className="container center"><p>加载中...</p></main>;
+    return <main className="container center"><div className="loading-spinner" /></main>;
   }
 
   // ─── Setup Page ───────────────────────────────────────────────────────────
@@ -155,6 +177,7 @@ function App() {
     return (
       <main className="container center">
         <div className="setup-card">
+          <div className="setup-icon">📡</div>
           <h1>Overseer Desktop</h1>
           <p className="subtitle">连接到 Overseer 服务器</p>
 
@@ -171,7 +194,7 @@ function App() {
           <div className="form-group">
             <label>注册令牌</label>
             <input
-              type="text"
+              type="password"
               value={token}
               onChange={(e) => setToken(e.target.value)}
               placeholder="从服务器配置中获取"
@@ -190,7 +213,7 @@ function App() {
 
           {error && <p className="error">{error}</p>}
 
-          <button onClick={handleRegister} disabled={registering}>
+          <button className="btn-primary" onClick={handleRegister} disabled={registering}>
             {registering ? "连接中..." : "连接"}
           </button>
         </div>
@@ -203,25 +226,53 @@ function App() {
     return (
       <main className="container">
         <div className="page-header">
-          <button className="btn-back" onClick={() => setPage("main")}>←</button>
+          <button className="btn-back" onClick={() => setPage("main")}>
+            <span>←</span>
+          </button>
           <h2>设置</h2>
         </div>
 
-        <div className="settings-section">
+        <div className="settings-card">
+          <div className="setting-group-title">连接</div>
           <div className="setting-item">
-            <span className="setting-label">服务器地址</span>
-            <span className="setting-value">{config?.server_url}</span>
+            <div className="setting-left">
+              <span className="setting-label">服务器地址</span>
+              <span className="setting-desc">WebSocket 和 API 连接地址</span>
+            </div>
+            <div className="setting-right">
+              <input
+                className="setting-input"
+                type="text"
+                value={editingUrl}
+                onChange={(e) => setEditingUrl(e.target.value)}
+                placeholder={config?.server_url}
+              />
+              <button
+                className="btn-sm"
+                onClick={handleSaveUrl}
+                disabled={savingUrl || !editingUrl || editingUrl === config?.server_url}
+              >
+                保存
+              </button>
+            </div>
           </div>
+
+          <div className="setting-group-title">设备</div>
           <div className="setting-item">
             <span className="setting-label">设备名称</span>
             <span className="setting-value">{config?.device_name}</span>
           </div>
           <div className="setting-item">
             <span className="setting-label">设备 ID</span>
-            <span className="setting-value mono">{config?.device_id}</span>
+            <span className="setting-value mono">{config?.device_id?.slice(0, 8)}...</span>
           </div>
+
+          <div className="setting-group-title">通用</div>
           <div className="setting-item">
-            <span className="setting-label">开机自启</span>
+            <div className="setting-left">
+              <span className="setting-label">开机自启</span>
+              <span className="setting-desc">登录时自动启动 Overseer Desktop</span>
+            </div>
             <label className="toggle">
               <input type="checkbox" checked={autostart} onChange={handleToggleAutostart} />
               <span className="toggle-slider" />
@@ -229,31 +280,38 @@ function App() {
           </div>
         </div>
 
-        <div className="settings-actions">
+        <div className="settings-footer">
           <button className="btn-danger" onClick={() => { setPage("setup"); setServerUrl(config?.server_url || ""); }}>
-            重新注册
+            重新注册设备
           </button>
         </div>
       </main>
     );
   }
 
-  // ─── Main Page (Two-column layout) ────────────────────────────────────────
+  // ─── Main Page ────────────────────────────────────────────────────────────
   return (
     <main className="app-layout">
-      {/* Left sidebar - channel groups */}
       <aside className="sidebar">
         <div className="sidebar-header">
-          <div className="app-title">Overseer</div>
-          <div className={`conn-dot ${wsStatus === "connected" ? "green" : "red"}`} />
+          <div className="app-brand">
+            <span className="app-logo">◉</span>
+            <span className="app-title">Overseer</span>
+          </div>
+          <div className={`status-indicator ${wsStatus === "connected" ? "online" : "offline"}`}>
+            <span className="status-dot" />
+            <span className="status-text">{wsStatus === "connected" ? "在线" : "离线"}</span>
+          </div>
         </div>
 
         <nav className="channel-list">
+          <div className="channel-section-title">频道</div>
           <div
             className={`channel-item ${activeChannel === "all" ? "active" : ""}`}
             onClick={() => setActiveChannel("all")}
           >
-            <span className="channel-name">全部</span>
+            <span className="channel-icon">📋</span>
+            <span className="channel-name">全部消息</span>
             {unreadCount > 0 && <span className="channel-badge">{unreadCount}</span>}
           </div>
 
@@ -263,6 +321,7 @@ function App() {
               className={`channel-item ${activeChannel === ch ? "active" : ""}`}
               onClick={() => setActiveChannel(ch)}
             >
+              <span className="channel-icon">{getChannelIcon(ch)}</span>
               <span className="channel-name">{ch}</span>
               {info.unread > 0 && <span className="channel-badge">{info.unread}</span>}
             </div>
@@ -270,42 +329,52 @@ function App() {
         </nav>
 
         <div className="sidebar-footer">
-          <button className="btn-icon" onClick={() => setPage("settings")} title="设置">⚙️</button>
-          <span className="device-label">{config?.device_name}</span>
+          <div className="user-info">
+            <span className="user-avatar">👤</span>
+            <span className="user-name">{config?.device_name}</span>
+          </div>
+          <button className="btn-icon" onClick={() => { setPage("settings"); setEditingUrl(config?.server_url || ""); }} title="设置">
+            ⚙
+          </button>
         </div>
       </aside>
 
-      {/* Right panel - notification list */}
       <section className="main-panel">
         <div className="panel-header">
-          <h2>{activeChannel === "all" ? "全部通知" : activeChannel}</h2>
+          <div className="panel-title">
+            <h2>{activeChannel === "all" ? "全部消息" : activeChannel}</h2>
+            <span className="panel-count">{filteredNotifications.length} 条</span>
+          </div>
           <div className="panel-actions">
             {unreadCount > 0 && (
-              <button className="btn-small" onClick={handleMarkAllRead}>全部已读</button>
+              <button className="btn-sm" onClick={handleMarkAllRead}>全部已读</button>
             )}
           </div>
         </div>
 
         <div className="notification-list">
           {filteredNotifications.length === 0 ? (
-            <div className="empty">
+            <div className="empty-state">
+              <div className="empty-icon">📭</div>
               <p>暂无通知</p>
+              <span>新消息将在这里显示</span>
             </div>
           ) : (
             filteredNotifications.map((n) => (
               <div
                 key={n.id}
-                className={`notification-item ${n.unread ? "unread" : ""}`}
+                className={`notification-card ${n.unread ? "unread" : ""}`}
                 onClick={() => n.unread && handleAck(n.id)}
               >
-                <div className="notification-meta">
-                  <span className="notification-source">{n.source || n.channel || "default"}</span>
-                  <span className="notification-time">
-                    {formatTime(n.received_at)}
-                  </span>
+                <div className="notification-indicator" />
+                <div className="notification-content">
+                  <div className="notification-meta">
+                    <span className="notification-source">{n.source || n.channel || "system"}</span>
+                    <span className="notification-time">{formatTime(n.received_at)}</span>
+                  </div>
+                  <div className="notification-title">{n.title}</div>
+                  {n.body && <div className="notification-body">{n.body}</div>}
                 </div>
-                <div className="notification-title">{n.title}</div>
-                {n.body && <div className="notification-body">{n.body}</div>}
               </div>
             ))
           )}
@@ -313,6 +382,18 @@ function App() {
       </section>
     </main>
   );
+}
+
+function getChannelIcon(channel: string): string {
+  const icons: Record<string, string> = {
+    urgent: "🔴",
+    monitor: "📊",
+    github: "🐙",
+    info: "ℹ️",
+    success: "✅",
+    default: "💬",
+  };
+  return icons[channel] || "📌";
 }
 
 function formatTime(iso: string): string {
@@ -323,7 +404,6 @@ function formatTime(iso: string): string {
   if (diff < 60000) return "刚刚";
   if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`;
   if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`;
-  if (d.toDateString() === new Date(now.getTime() - 86400000).toDateString()) return "昨天";
   return d.toLocaleDateString();
 }
 

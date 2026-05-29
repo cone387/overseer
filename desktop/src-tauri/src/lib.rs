@@ -127,6 +127,23 @@ async fn ack_message(message_id: String, state: tauri::State<'_, AppState>) -> R
     Ok(())
 }
 
+/// Update server URL in config.
+#[tauri::command]
+async fn update_server_url(
+    app_handle: AppHandle,
+    server_url: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let mut cfg = state.config.lock().await;
+    cfg.server_url = server_url;
+    cfg.save()?;
+    // Restart WS with new URL
+    let cfg_clone = cfg.clone();
+    drop(cfg);
+    start_ws_client(app_handle, cfg_clone);
+    Ok(())
+}
+
 /// Get autostart status.
 #[tauri::command]
 fn get_autostart_enabled() -> bool {
@@ -172,6 +189,7 @@ pub fn run() {
             is_connected,
             toggle_mute,
             ack_message,
+            update_server_url,
             get_autostart_enabled,
             set_autostart,
         ])
