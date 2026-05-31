@@ -14,6 +14,14 @@ function AuthGuard({ children }: AuthGuardProps) {
 
   useEffect(() => {
     checkAuth()
+
+    // Listen for token expiry events from API layer
+    const handleAuthExpired = () => {
+      setState('login')
+      setError('登录已过期，请重新登录')
+    }
+    window.addEventListener('auth-expired', handleAuthExpired)
+    return () => window.removeEventListener('auth-expired', handleAuthExpired)
   }, [])
 
   async function checkAuth() {

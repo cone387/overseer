@@ -114,15 +114,11 @@ async fn toggle_mute(state: tauri::State<'_, AppState>) -> Result<bool, String> 
     Ok(*muted)
 }
 
-/// Acknowledge a message.
+/// Acknowledge a message (mark as read locally).
 #[tauri::command]
 async fn ack_message(message_id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    let cfg = state.config.lock().await;
-    let base_url = cfg.server_url.clone();
-    drop(cfg);
-    api::ack_message(&base_url, &message_id).await?;
     if let Some(ref c) = *state.cache {
-        let _ = c.mark_read(&message_id);
+        c.mark_read(&message_id)?;
     }
     Ok(())
 }

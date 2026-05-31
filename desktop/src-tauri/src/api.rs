@@ -76,12 +76,13 @@ pub async fn register(base_url: &str, name: &str, token: &str) -> Result<Device,
 }
 
 /// POST with exponential backoff retry (max 3 attempts, 1s→2s→4s).
-pub async fn post_with_retry(url: &str, body: Option<&[u8]>) -> Result<(), String> {
+pub async fn post_with_retry(url: &str, body: Option<&[u8]>, api_key: &str) -> Result<(), String> {
     let client = http_client();
     let mut backoff = Duration::from_secs(1);
 
     for attempt in 0..3 {
-        let mut req = client.post(url);
+        let mut req = client.post(url)
+            .header("X-Device-Key", api_key);
         if let Some(b) = body {
             req = req.header("content-type", "application/json").body(b.to_vec());
         }
@@ -111,14 +112,14 @@ pub async fn post_with_retry(url: &str, body: Option<&[u8]>) -> Result<(), Strin
 }
 
 /// Acknowledge a message.
-pub async fn ack_message(base_url: &str, message_id: &str) -> Result<(), String> {
+pub async fn ack_message(base_url: &str, api_key: &str, message_id: &str) -> Result<(), String> {
     let url = format!("{}/api/messages/{}/ack", base_url, message_id);
-    post_with_retry(&url, None).await
+    post_with_retry(&url, None, api_key).await
 }
 
 /// Snooze a message.
-pub async fn snooze_message(base_url: &str, message_id: &str, duration: &str) -> Result<(), String> {
+pub async fn snooze_message(base_url: &str, api_key: &str, message_id: &str, duration: &str) -> Result<(), String> {
     let url = format!("{}/api/messages/{}/snooze", base_url, message_id);
     let body = serde_json::json!({"duration": duration}).to_string();
-    post_with_retry(&url, Some(body.as_bytes())).await
+    post_with_retry(&url, Some(body.as_bytes()), api_key).await
 }

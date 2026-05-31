@@ -66,8 +66,18 @@ async function request<T>(
   })
 
   const json = await res.json()
+
+  // Token expired or invalid — redirect to login
+  if (res.status === 401 && !path.includes('/auth/')) {
+    window.dispatchEvent(new CustomEvent('auth-expired'))
+    throw new ApiError(401, '登录已过期，请重新登录')
+  }
+
   if (!res.ok) {
     throw new ApiError(json.code || res.status, json.message || res.statusText)
+  }
+  return json as ApiResponse<T>
+}
   }
   return json as ApiResponse<T>
 }
