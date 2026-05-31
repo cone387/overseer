@@ -127,7 +127,7 @@ function App() {
       setPage("linking");
 
       // Open browser to the server's desktop-link page
-      await openUrl(`${serverUrl}/#/desktop-link?code=${code}`);
+      await openUrl(`${serverUrl}/desktop-link?code=${code}`);
 
       // Start polling
       startPolling(code);
@@ -268,7 +268,7 @@ function App() {
           <p className="linking-hint">
             如果浏览器未自动打开，请手动访问：
           </p>
-          <p className="linking-url">{serverUrl}/#/desktop-link?code={linkCode}</p>
+          <p className="linking-url">{serverUrl}/desktop-link?code={linkCode}</p>
 
           <button className="btn-secondary" onClick={handleCancelLink}>
             取消
