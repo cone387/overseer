@@ -37,7 +37,71 @@ fn http_client() -> Client {
         .unwrap_or_default()
 }
 
-/// Register this desktop client with the server.
+/// Initiate desktop link flow. Returns a link code.
+/// POST /api/devices/desktop-link
+pub async fn desktop_link(base_url: &str, name: &str) -> Result<String, String> {
+    let url = format!("{}/api/devices/desktop-link", base_url);
+    let body = serde_json::json!({"name": name});
+
+    let resp = http_client()
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {}", e))?;
+
+    let resp_body = resp.text().await.map_err(|e| format!("read response: {}", e))?;
+    let api_resp: ApiResponse =
+        serde_json::from_str(&resp_body).map_err(|e| format!("parse: {}", e))?;
+
+    if api_resp.code != 200 {
+        return Err(format!("{} (code {})", api_resp.message, api_resp.code));
+    }
+
+    let data = api_resp.data.ok_or("no data")?;
+    data.get("link_code")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| "no link_code in response".to_string())
+}
+
+/// Poll for desktop link confirmation.
+/// GET /api/devices/desktop-poll?code=xxx
+/// Returns Ok(Some(device)) when confirmed, Ok(None) when still pending.
+pub async fn desktop_poll(base_url: &str, code: &str) -> Result<Option<Device>, String> {
+    let url = format!("{}/api/devices/desktop-poll?code={}", base_url, code);
+
+    let resp = http_client()
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {}", e))?;
+
+    let status = resp.status().as_u16();
+    let resp_body = resp.text().await.map_err(|e| format!("read response: {}", e))?;
+
+    if status == 202 {
+        // Still pending
+        return Ok(None);
+    }
+
+    if status == 404 || status == 410 {
+        return Err("link code expired or not found".to_string());
+    }
+
+    let api_resp: ApiResponse =
+        serde_json::from_str(&resp_body).map_err(|e| format!("parse: {}", e))?;
+
+    if api_resp.code != 200 {
+        return Err(format!("{}", api_resp.message));
+    }
+
+    let data = api_resp.data.ok_or("no data")?;
+    let device: Device = serde_json::from_value(data).map_err(|e| format!("parse device: {}", e))?;
+    Ok(Some(device))
+}
+
+/// Register this desktop client with the server (legacy token-based).
 /// POST /api/devices/desktop-register
 pub async fn register(base_url: &str, name: &str, token: &str) -> Result<Device, String> {
     let url = format!("{}/api/devices/desktop-register", base_url);

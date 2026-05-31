@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
@@ -21,7 +21,7 @@ interface Notification {
   unread: boolean;
 }
 
-type Page = "loading" | "setup" | "main" | "settings";
+type Page = "loading" | "setup" | "linking" | "main" | "settings";
 
 function App() {
   const [page, setPage] = useState<Page>("loading");
@@ -35,9 +35,11 @@ function App() {
 
   // Setup form
   const [serverUrl, setServerUrl] = useState("http://localhost:9721");
-  const [token, setToken] = useState("");
   const [deviceName, setDeviceName] = useState("");
-  const [registering, setRegistering] = useState(false);
+
+  // Linking state
+  const [linkCode, setLinkCode] = useState("");
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Settings form
   const [editingUrl, setEditingUrl] = useState("");
@@ -49,11 +51,11 @@ function App() {
       if (cfg.server_url && cfg.api_key) {
         setPage("main");
         loadNotifications();
-        // Query actual connection status
         invoke<boolean>("is_connected").then((connected) => {
           setWsStatus(connected ? "connected" : "disconnected");
         });
       } else {
+        if (cfg.server_url) setServerUrl(cfg.server_url);
         setPage("setup");
       }
     });
@@ -64,7 +66,7 @@ function App() {
       setWsStatus(event.payload);
       if (event.payload === "auth_failed") {
         setPage("setup");
-        setError("认证失败，请重新注册");
+        setError("认证失败，请重新授权");
       }
     });
 
@@ -76,6 +78,7 @@ function App() {
     return () => {
       unlisten1.then((f) => f());
       unlisten2.then((f) => f());
+      if (pollRef.current) clearInterval(pollRef.current);
     };
   }, []);
 
@@ -106,26 +109,61 @@ function App() {
     return notifications.filter((n) => (n.channel || "default") === activeChannel);
   }, [notifications, activeChannel]);
 
-  const handleRegister = async () => {
-    if (!serverUrl || !token) {
-      setError("请填写服务器地址和注册令牌");
+  // ─── Auth Flow ────────────────────────────────────────────────────────────
+
+  const handleStartLink = async () => {
+    if (!serverUrl) {
+      setError("请填写服务器地址");
       return;
     }
     setError("");
-    setRegistering(true);
     try {
-      await invoke<string>("register_device", { serverUrl, token, deviceName });
-      const cfg = await invoke<Config>("get_config");
-      setConfig(cfg);
-      setPage("main");
-      setWsStatus("connected");
-      loadNotifications();
+      const code = await invoke<string>("start_desktop_link", {
+        serverUrl,
+        deviceName,
+      });
+      setLinkCode(code);
+      setPage("linking");
+
+      // Open browser to the server's desktop-link page
+      window.open(`${serverUrl}/#/desktop-link?code=${code}`, "_blank");
+
+      // Start polling
+      startPolling(code);
     } catch (e: any) {
-      setError(typeof e === "string" ? e : e.message || "注册失败");
-    } finally {
-      setRegistering(false);
+      setError(typeof e === "string" ? e : e.message || "连接失败");
     }
   };
+
+  const startPolling = (code: string) => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const confirmed = await invoke<boolean>("poll_desktop_link", { code });
+        if (confirmed) {
+          if (pollRef.current) clearInterval(pollRef.current);
+          const cfg = await invoke<Config>("get_config");
+          setConfig(cfg);
+          setPage("main");
+          setWsStatus("connected");
+          loadNotifications();
+        }
+      } catch (e: any) {
+        // Code expired or error
+        if (pollRef.current) clearInterval(pollRef.current);
+        setError(typeof e === "string" ? e : "授权超时，请重试");
+        setPage("setup");
+      }
+    }, 2000);
+  };
+
+  const handleCancelLink = () => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    setPage("setup");
+    setLinkCode("");
+  };
+
+  // ─── Actions ──────────────────────────────────────────────────────────────
 
   const handleMarkAllRead = async () => {
     await invoke("mark_all_read");
@@ -192,16 +230,6 @@ function App() {
           </div>
 
           <div className="form-group">
-            <label>注册令牌</label>
-            <input
-              type="password"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="从服务器配置中获取"
-            />
-          </div>
-
-          <div className="form-group">
             <label>设备名称（可选）</label>
             <input
               type="text"
@@ -213,8 +241,36 @@ function App() {
 
           {error && <p className="error">{error}</p>}
 
-          <button className="btn-primary" onClick={handleRegister} disabled={registering}>
-            {registering ? "连接中..." : "连接"}
+          <button className="btn-primary" onClick={handleStartLink}>
+            授权登录
+          </button>
+          <p className="setup-hint">点击后将打开浏览器完成登录授权</p>
+        </div>
+      </main>
+    );
+  }
+
+  // ─── Linking (Waiting for confirmation) ───────────────────────────────────
+  if (page === "linking") {
+    return (
+      <main className="container center">
+        <div className="setup-card">
+          <div className="linking-spinner" />
+          <h2>等待授权</h2>
+          <p className="subtitle">请在浏览器中完成登录并确认授权</p>
+
+          <div className="link-code-display">
+            <span className="link-code-label">授权码</span>
+            <span className="link-code">{linkCode}</span>
+          </div>
+
+          <p className="linking-hint">
+            如果浏览器未自动打开，请手动访问：
+          </p>
+          <p className="linking-url">{serverUrl}/#/desktop-link?code={linkCode}</p>
+
+          <button className="btn-secondary" onClick={handleCancelLink}>
+            取消
           </button>
         </div>
       </main>
@@ -226,9 +282,7 @@ function App() {
     return (
       <main className="container">
         <div className="page-header">
-          <button className="btn-back" onClick={() => setPage("main")}>
-            <span>←</span>
-          </button>
+          <button className="btn-back" onClick={() => setPage("main")}><span>←</span></button>
           <h2>设置</h2>
         </div>
 
@@ -282,7 +336,7 @@ function App() {
 
         <div className="settings-footer">
           <button className="btn-danger" onClick={() => { setPage("setup"); setServerUrl(config?.server_url || ""); }}>
-            重新注册设备
+            重新授权
           </button>
         </div>
       </main>
@@ -333,9 +387,7 @@ function App() {
             <span className="user-avatar">👤</span>
             <span className="user-name">{config?.device_name}</span>
           </div>
-          <button className="btn-icon" onClick={() => { setPage("settings"); setEditingUrl(config?.server_url || ""); }} title="设置">
-            ⚙
-          </button>
+          <button className="btn-icon" onClick={() => { setPage("settings"); setEditingUrl(config?.server_url || ""); }} title="设置">⚙</button>
         </div>
       </aside>
 
@@ -386,12 +438,8 @@ function App() {
 
 function getChannelIcon(channel: string): string {
   const icons: Record<string, string> = {
-    urgent: "🔴",
-    monitor: "📊",
-    github: "🐙",
-    info: "ℹ️",
-    success: "✅",
-    default: "💬",
+    urgent: "🔴", monitor: "📊", github: "🐙",
+    info: "ℹ️", success: "✅", default: "💬",
   };
   return icons[channel] || "📌";
 }
@@ -400,7 +448,6 @@ function formatTime(iso: string): string {
   const d = new Date(iso);
   const now = new Date();
   const diff = now.getTime() - d.getTime();
-
   if (diff < 60000) return "刚刚";
   if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`;
   if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`;

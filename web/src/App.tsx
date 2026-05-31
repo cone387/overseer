@@ -9,6 +9,7 @@ import Devices from './pages/Devices'
 import Channels from './pages/Channels'
 import ApiKeys from './pages/ApiKeys'
 import Settings from './pages/Settings'
+import DesktopLink from './pages/DesktopLink'
 
 function App() {
   return (
@@ -24,6 +25,7 @@ function App() {
           <Route path="api-keys" element={<ApiKeys />} />
           <Route path="settings" element={<Settings />} />
         </Route>
+        <Route path="/desktop-link" element={<DesktopLink />} />
       </Routes>
     </AuthGuard>
   )

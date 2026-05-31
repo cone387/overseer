@@ -31,7 +31,61 @@ pub struct AppState {
 
 // ─── Tauri Commands ───────────────────────────────────────────────────────────
 
-/// Register device with the server (called from frontend setup page).
+/// Initiate desktop link auth flow — returns a code and opens browser.
+#[tauri::command]
+async fn start_desktop_link(
+    server_url: String,
+    device_name: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    let name = if device_name.is_empty() {
+        format!("Desktop {}", hostname::get().unwrap_or_default().to_string_lossy())
+    } else {
+        device_name
+    };
+
+    let code = api::desktop_link(&server_url, &name).await?;
+
+    // Save server_url to config (even before confirmation)
+    let mut cfg = state.config.lock().await;
+    cfg.server_url = server_url;
+    let _ = cfg.save();
+
+    Ok(code)
+}
+
+/// Poll for desktop link confirmation.
+#[tauri::command]
+async fn poll_desktop_link(
+    app_handle: AppHandle,
+    code: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<bool, String> {
+    let cfg = state.config.lock().await;
+    let server_url = cfg.server_url.clone();
+    drop(cfg);
+
+    match api::desktop_poll(&server_url, &code).await? {
+        Some(device) => {
+            // Confirmed! Save device info
+            let mut cfg = state.config.lock().await;
+            cfg.api_key = device.device_key.clone();
+            cfg.device_id = device.id.clone();
+            cfg.device_name = device.name.clone();
+            cfg.save()?;
+
+            // Start WS connection
+            let cfg_clone = cfg.clone();
+            drop(cfg);
+            start_ws_client(app_handle, cfg_clone);
+
+            Ok(true)
+        }
+        None => Ok(false), // Still pending
+    }
+}
+
+/// Register device with the server (legacy token-based, called from frontend setup page).
 #[tauri::command]
 async fn register_device(
     app_handle: AppHandle,
@@ -177,6 +231,8 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
+            start_desktop_link,
+            poll_desktop_link,
             register_device,
             get_config,
             get_recent_notifications,

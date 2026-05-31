@@ -50,7 +50,7 @@ interface PagedData<T> {
 
 export type { ApiResponse, PagedData }
 
-async function request<T>(
+export async function request<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {

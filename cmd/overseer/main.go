@@ -382,6 +382,9 @@ func main() {
 	// Auth protected routes (change-password, me)
 	authHandler.RegisterProtectedRoutes(api)
 
+	// Desktop link confirm (requires auth)
+	desktopHandler.RegisterProtectedRoutes(api)
+
 	// API Keys management (requires JWT auth)
 	apiKeysHandler := handler.NewAPIKeysHandler(db)
 	apiKeysHandler.RegisterRoutes(api)
