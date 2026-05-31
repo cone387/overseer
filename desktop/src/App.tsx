@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import "./App.css";
 
 interface Config {
@@ -126,7 +127,7 @@ function App() {
       setPage("linking");
 
       // Open browser to the server's desktop-link page
-      window.open(`${serverUrl}/#/desktop-link?code=${code}`, "_blank");
+      await openUrl(`${serverUrl}/#/desktop-link?code=${code}`);
 
       // Start polling
       startPolling(code);
