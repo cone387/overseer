@@ -78,9 +78,6 @@ export async function request<T>(
   }
   return json as ApiResponse<T>
 }
-  }
-  return json as ApiResponse<T>
-}
 
 // ─── Auth API ────────────────────────────────────────────────────────────────
 
