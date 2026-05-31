@@ -297,24 +297,25 @@ body {
   gap: 12px;
   padding: 14px 16px;
   border-radius: var(--radius);
-  margin-bottom: 4px;
+  margin-bottom: 8px;
   cursor: pointer;
   transition: all 0.12s ease;
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
+  background: var(--surface);
 }
 
 .notification-card:hover {
-  background: var(--surface);
-  border-color: var(--border);
+  border-color: var(--accent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .notification-card.unread {
   background: var(--accent-dim);
-  border-color: rgba(91, 141, 239, 0.2);
+  border-color: rgba(91, 141, 239, 0.25);
 }
 
 .notification-card.unread:hover {
-  background: rgba(91, 141, 239, 0.14);
+  border-color: var(--accent);
 }
 
 .notification-indicator {
@@ -750,11 +751,11 @@ body {
 
   .notification-card.unread {
     background: rgba(37, 99, 235, 0.04);
-    border-color: rgba(37, 99, 235, 0.15);
+    border-color: rgba(37, 99, 235, 0.2);
   }
 
   .notification-card.unread:hover {
-    background: rgba(37, 99, 235, 0.07);
+    border-color: var(--accent);
   }
 
   .status-indicator.online {
