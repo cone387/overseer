@@ -4,32 +4,35 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-const MAX_ENTRIES: u32 = 50;
+const MAX_ENTRIES: i64 = 50;
 
+/// A cached notification entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NotificationEntry {
+pub struct Entry {
     pub id: String,
     pub title: String,
     pub body: String,
     pub url: String,
     pub channel: String,
     pub source: String,
-    pub level: String,
-    pub received_at: String,
+    pub received_at: DateTime<Utc>,
     pub unread: bool,
-    pub acked_at: Option<String>,
-    pub expires_at: Option<String>,
+    pub acked_at: Option<DateTime<Utc>>,
+    pub expires_at: Option<DateTime<Utc>>,
 }
 
+/// Notification cache backed by SQLite.
 pub struct Cache {
     conn: Mutex<Connection>,
 }
 
 impl Cache {
+    /// Create a new cache, initializing the SQLite database.
     pub fn new() -> Result<Self, String> {
-        let db_path = Self::db_path();
-        let dir = db_path.parent().unwrap();
-        std::fs::create_dir_all(dir).map_err(|e| format!("create cache dir: {}", e))?;
+        let db_path = Self::db_file_path()?;
+        if let Some(dir) = db_path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("create cache dir: {}", e))?;
+        }
 
         let conn =
             Connection::open(&db_path).map_err(|e| format!("open cache db: {}", e))?;
@@ -38,12 +41,11 @@ impl Cache {
             "CREATE TABLE IF NOT EXISTS notifications (
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
-                body TEXT DEFAULT '',
-                url TEXT DEFAULT '',
-                channel TEXT DEFAULT '',
-                source TEXT DEFAULT '',
-                level TEXT DEFAULT 'default',
-                received_at TEXT NOT NULL,
+                body TEXT,
+                url TEXT,
+                channel TEXT,
+                source TEXT,
+                received_at TEXT DEFAULT (datetime('now')),
                 unread INTEGER DEFAULT 1,
                 acked_at TEXT,
                 expires_at TEXT
@@ -51,23 +53,16 @@ impl Cache {
         )
         .map_err(|e| format!("create table: {}", e))?;
 
-        // Migrate: add level column if it doesn't exist (for databases from Go version)
-        let _ = conn.execute_batch("ALTER TABLE notifications ADD COLUMN level TEXT DEFAULT 'default'");
-
         Ok(Self {
             conn: Mutex::new(conn),
         })
     }
 
-    fn db_path() -> PathBuf {
-        let base = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
-        base.join("overseer-desktop").join("notifications.db")
-    }
-
-    pub fn add(&self, entry: &NotificationEntry) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
+    /// Add a notification entry, enforcing the max limit.
+    pub fn add(&self, entry: &Entry) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
-            "INSERT OR REPLACE INTO notifications (id, title, body, url, channel, source, level, received_at, unread, acked_at, expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT OR REPLACE INTO notifications (id, title, body, url, channel, source, received_at, unread, acked_at, expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 entry.id,
                 entry.title,
@@ -75,55 +70,41 @@ impl Cache {
                 entry.url,
                 entry.channel,
                 entry.source,
-                entry.level,
-                entry.received_at,
+                entry.received_at.to_rfc3339(),
                 entry.unread as i32,
-                entry.acked_at,
-                entry.expires_at,
+                entry.acked_at.map(|t| t.to_rfc3339()),
+                entry.expires_at.map(|t| t.to_rfc3339()),
             ],
-        )
-        .map_err(|e| format!("insert notification: {}", e))?;
+        ).map_err(|e| format!("insert: {}", e))?;
 
         // Enforce max entries
         conn.execute(
             "DELETE FROM notifications WHERE id NOT IN (SELECT id FROM notifications ORDER BY received_at DESC LIMIT ?1)",
             params![MAX_ENTRIES],
-        )
-        .map_err(|e| format!("enforce max entries: {}", e))?;
+        ).map_err(|e| format!("cleanup: {}", e))?;
 
         Ok(())
     }
 
+    /// Mark a single notification as read.
     pub fn mark_read(&self, id: &str) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE notifications SET unread = 0 WHERE id = ?1",
-            params![id],
-        )
-        .map_err(|e| format!("mark read: {}", e))?;
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        conn.execute("UPDATE notifications SET unread = 0 WHERE id = ?1", params![id])
+            .map_err(|e| format!("mark read: {}", e))?;
         Ok(())
     }
 
+    /// Mark all notifications as read.
     pub fn mark_all_read(&self) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.execute("UPDATE notifications SET unread = 0 WHERE unread = 1", [])
             .map_err(|e| format!("mark all read: {}", e))?;
         Ok(())
     }
 
-    pub fn mark_ack_synced(&self, id: &str) -> Result<(), String> {
-        let conn = self.conn.lock().unwrap();
-        let now = Utc::now().to_rfc3339();
-        conn.execute(
-            "UPDATE notifications SET unread = 0, acked_at = ?1 WHERE id = ?2",
-            params![now, id],
-        )
-        .map_err(|e| format!("mark ack synced: {}", e))?;
-        Ok(())
-    }
-
+    /// Get the count of unexpired unread notifications.
     pub fn unread_count(&self) -> Result<i32, String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let now = Utc::now().to_rfc3339();
         let count: i32 = conn
             .query_row(
@@ -135,75 +116,65 @@ impl Cache {
         Ok(count)
     }
 
-    pub fn recent(&self, limit: u32) -> Result<Vec<NotificationEntry>, String> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, title, body, url, channel, source, level, received_at, unread, acked_at, expires_at FROM notifications ORDER BY received_at DESC LIMIT ?1",
-            )
-            .map_err(|e| format!("prepare recent: {}", e))?;
-
-        let entries = stmt
-            .query_map(params![limit], |row| {
-                Ok(NotificationEntry {
-                    id: row.get(0)?,
-                    title: row.get(1)?,
-                    body: row.get::<_, String>(2).unwrap_or_default(),
-                    url: row.get::<_, String>(3).unwrap_or_default(),
-                    channel: row.get::<_, String>(4).unwrap_or_default(),
-                    source: row.get::<_, String>(5).unwrap_or_default(),
-                    level: row.get::<_, String>(6).unwrap_or_default(),
-                    received_at: row.get(7)?,
-                    unread: row.get::<_, i32>(8).unwrap_or(0) == 1,
-                    acked_at: row.get(9).ok(),
-                    expires_at: row.get(10).ok(),
-                })
-            })
-            .map_err(|e| format!("query recent: {}", e))?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        Ok(entries)
-    }
-
-    pub fn get_unexpired_unread(&self) -> Result<Vec<NotificationEntry>, String> {
-        let conn = self.conn.lock().unwrap();
+    /// Mark a notification as ack-synced (read + acked_at timestamp).
+    pub fn mark_ack_synced(&self, id: &str) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE notifications SET unread = 0, acked_at = ?1 WHERE id = ?2",
+            params![now, id],
+        )
+        .map_err(|e| format!("ack sync: {}", e))?;
+        Ok(())
+    }
+
+    /// Get the N most recent notifications.
+    pub fn recent(&self, n: i32) -> Result<Vec<Entry>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn
-            .prepare(
-                "SELECT id, title, body, url, channel, source, level, received_at, unread, acked_at, expires_at FROM notifications WHERE unread = 1 AND (expires_at IS NULL OR expires_at > ?1) ORDER BY received_at DESC",
-            )
-            .map_err(|e| format!("prepare unread: {}", e))?;
+            .prepare("SELECT id, title, body, url, channel, source, received_at, unread, acked_at, expires_at FROM notifications ORDER BY received_at DESC LIMIT ?1")
+            .map_err(|e| format!("prepare: {}", e))?;
 
         let entries = stmt
-            .query_map(params![now], |row| {
-                Ok(NotificationEntry {
-                    id: row.get(0)?,
-                    title: row.get(1)?,
-                    body: row.get::<_, String>(2).unwrap_or_default(),
-                    url: row.get::<_, String>(3).unwrap_or_default(),
-                    channel: row.get::<_, String>(4).unwrap_or_default(),
-                    source: row.get::<_, String>(5).unwrap_or_default(),
-                    level: row.get::<_, String>(6).unwrap_or_default(),
-                    received_at: row.get(7)?,
-                    unread: true,
-                    acked_at: row.get(9).ok(),
-                    expires_at: row.get(10).ok(),
-                })
+            .query_map(params![n], |row| {
+                Ok(Self::row_to_entry(row))
             })
-            .map_err(|e| format!("query unread: {}", e))?
+            .map_err(|e| format!("query: {}", e))?
             .filter_map(|r| r.ok())
             .collect();
 
         Ok(entries)
     }
 
-    pub fn is_expired(expires_at: &Option<String>) -> bool {
-        if let Some(exp) = expires_at {
-            if let Ok(exp_time) = DateTime::parse_from_rfc3339(exp) {
-                return Utc::now() > exp_time;
-            }
+    fn row_to_entry(row: &rusqlite::Row) -> Entry {
+        let received_at_str: String = row.get(6).unwrap_or_default();
+        let unread_int: i32 = row.get(7).unwrap_or(1);
+        let acked_at_str: Option<String> = row.get(8).unwrap_or(None);
+        let expires_at_str: Option<String> = row.get(9).unwrap_or(None);
+
+        Entry {
+            id: row.get(0).unwrap_or_default(),
+            title: row.get(1).unwrap_or_default(),
+            body: row.get(2).unwrap_or_default(),
+            url: row.get(3).unwrap_or_default(),
+            channel: row.get(4).unwrap_or_default(),
+            source: row.get(5).unwrap_or_default(),
+            received_at: DateTime::parse_from_rfc3339(&received_at_str)
+                .map(|dt| dt.with_timezone(&Utc))
+                .unwrap_or_else(|_| Utc::now()),
+            unread: unread_int == 1,
+            acked_at: acked_at_str
+                .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
+                .map(|dt| dt.with_timezone(&Utc)),
+            expires_at: expires_at_str
+                .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
+                .map(|dt| dt.with_timezone(&Utc)),
         }
-        false
+    }
+
+    fn db_file_path() -> Result<PathBuf, String> {
+        dirs::config_dir()
+            .map(|d| d.join("overseer-desktop").join("notifications.db"))
+            .ok_or_else(|| "cannot determine config dir".to_string())
     }
 }

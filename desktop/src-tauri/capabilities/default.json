@@ -1,25 +1,16 @@
 {
   "identifier": "default",
-  "description": "Capability for the main window and tray",
-  "windows": ["main", "setup", "settings", "messages"],
+  "description": "Capability for the main window",
+  "windows": ["main"],
   "permissions": [
     "core:default",
-    "core:window:default",
-    "core:window:allow-create",
-    "core:window:allow-close",
-    "core:window:allow-show",
-    "core:window:allow-hide",
-    "core:window:allow-set-focus",
-    "core:window:allow-center",
-    "core:event:default",
-    "core:tray:default",
-    "core:menu:default",
     "opener:default",
     "notification:default",
-    "notification:allow-notify",
-    "notification:allow-request-permission",
     "notification:allow-is-permission-granted",
-    "autostart:default",
-    "store:default"
+    "notification:allow-request-permission",
+    "notification:allow-notify",
+    "core:event:default",
+    "core:event:allow-emit",
+    "core:event:allow-listen"
   ]
 }

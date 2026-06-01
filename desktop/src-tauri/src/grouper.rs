@@ -1,125 +1,118 @@
-use crate::websocket::PushEvent;
 use log::info;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use tauri::{AppHandle, Emitter};
-use tokio::time::Instant;
+use tokio::time::{sleep, Duration};
 
-const GROUP_WINDOW: Duration = Duration::from_secs(30);
-
+/// Push event for grouping.
 #[derive(Debug, Clone)]
+pub struct PushEvent {
+    pub id: String,
+    pub source: String,
+    pub channel: String,
+    pub title: String,
+    pub body: String,
+    pub url: String,
+    pub level: String,
+}
+
+/// Callback type for showing a notification.
+pub type ShowFn = Arc<dyn Fn(String, String, String, String, String, String, String) + Send + Sync>;
+
 struct PendingGroup {
-    source: String,
     events: Vec<PushEvent>,
-    first_at: Instant,
 }
 
 /// Groups rapid notifications from the same source within a 30-second window.
-/// The first notification is shown immediately; subsequent ones from the same source
-/// within the window are batched into a summary notification.
 pub struct Grouper {
+    window: Duration,
     pending: Arc<Mutex<HashMap<String, PendingGroup>>>,
-    app: AppHandle,
+    show_fn: ShowFn,
 }
 
 impl Grouper {
-    pub fn new(app: AppHandle) -> Self {
-        let pending: Arc<Mutex<HashMap<String, PendingGroup>>> =
-            Arc::new(Mutex::new(HashMap::new()));
-
-        // Spawn flush loop
-        let pending_clone = pending.clone();
-        let app_clone = app.clone();
-        tauri::async_runtime::spawn(async move {
-            loop {
-                tokio::time::sleep(Duration::from_secs(5)).await;
-                Self::flush_expired(&pending_clone, &app_clone);
-            }
-        });
-
-        Self { pending, app }
+    pub fn new(show_fn: ShowFn) -> Self {
+        Self {
+            window: Duration::from_secs(30),
+            pending: Arc::new(Mutex::new(HashMap::new())),
+            show_fn,
+        }
     }
 
     /// Process an incoming push event.
-    /// Returns Some(event) if it should be shown immediately, None if grouped.
-    pub fn ingest(&self, event: PushEvent) -> Option<PushEvent> {
-        let source = event.source.clone();
-        if source.is_empty() {
-            // No source — show immediately without grouping
-            return Some(event);
-        }
-
+    pub fn ingest(&self, event: PushEvent) {
         let mut pending = self.pending.lock().unwrap();
 
-        if let Some(group) = pending.get_mut(&source) {
-            // Add to existing group
+        if let Some(group) = pending.get_mut(&event.source) {
+            // Add to existing group - already shown the first one
             group.events.push(event);
-            info!(
-                "[grouper] batched notification from '{}' (count: {})",
-                source,
-                group.events.len()
-            );
-            None
-        } else {
-            // First event from this source — show immediately and start group
-            let group = PendingGroup {
-                source: source.clone(),
-                events: vec![event.clone()],
-                first_at: Instant::now(),
-            };
-            pending.insert(source, group);
-            Some(event)
+            return;
         }
+
+        // First event from this source - show immediately
+        (self.show_fn)(
+            event.title.clone(),
+            event.body.clone(),
+            event.url.clone(),
+            event.channel.clone(),
+            event.source.clone(),
+            event.level.clone(),
+            event.id.clone(),
+        );
+
+        // Start a new group
+        let source = event.source.clone();
+        pending.insert(
+            source.clone(),
+            PendingGroup {
+                events: vec![event],
+            },
+        );
+        drop(pending);
+
+        // Schedule flush after window expires
+        let pending_ref = self.pending.clone();
+        let show_fn = self.show_fn.clone();
+        let window = self.window;
+
+        tokio::spawn(async move {
+            sleep(window).await;
+            flush(&source, &pending_ref, &show_fn);
+        });
+    }
+}
+
+fn flush(
+    source: &str,
+    pending: &Arc<Mutex<HashMap<String, PendingGroup>>>,
+    show_fn: &ShowFn,
+) {
+    let group = {
+        let mut map = pending.lock().unwrap();
+        map.remove(source)
+    };
+
+    let Some(group) = group else { return };
+
+    // If only 1 event, it was already shown immediately
+    if group.events.len() <= 1 {
+        return;
     }
 
-    fn flush_expired(
-        pending: &Arc<Mutex<HashMap<String, PendingGroup>>>,
-        app: &AppHandle,
-    ) {
-        let now = Instant::now();
-        let mut to_flush = Vec::new();
+    // Show summary for events 2+ (first was already shown)
+    let count = group.events.len() - 1;
+    let title = format!("[{}] {} 条新通知", source, count);
+    let body = group.events.last().map(|e| e.title.clone()).unwrap_or_default();
+    let channel = group.events[0].channel.clone();
 
-        {
-            let mut map = pending.lock().unwrap();
-            let expired_keys: Vec<String> = map
-                .iter()
-                .filter(|(_, group)| now.duration_since(group.first_at) >= GROUP_WINDOW)
-                .map(|(key, _)| key.clone())
-                .collect();
+    info!("[grouper] flushing {} grouped notifications from {}", count, source);
 
-            for key in expired_keys {
-                if let Some(group) = map.remove(&key) {
-                    to_flush.push(group);
-                }
-            }
-        }
-
-        for group in to_flush {
-            if group.events.len() > 1 {
-                // Show summary for events 2+ (first was already shown)
-                let count = group.events.len() - 1;
-                let summary_title = format!("[{}] {} 条新通知", group.source, count);
-                let summary_body = group.events.last().map(|e| e.title.clone()).unwrap_or_default();
-
-                let summary = PushEvent {
-                    id: String::new(),
-                    source: group.source,
-                    channel: group.events[0].channel.clone(),
-                    title: summary_title,
-                    body: summary_body,
-                    url: String::new(),
-                    icon: String::new(),
-                    level: "default".to_string(),
-                    status: String::new(),
-                    time: String::new(),
-                    expires_at: String::new(),
-                };
-
-                info!("[grouper] flushing summary for '{}'", summary.source);
-                let _ = app.emit("show-notification", &summary);
-            }
-            // If only 1 event, it was already shown immediately
-        }
-    }
+    (show_fn)(
+        title,
+        body,
+        String::new(),
+        channel,
+        source.to_string(),
+        "default".to_string(),
+        String::new(),
+    );
 }

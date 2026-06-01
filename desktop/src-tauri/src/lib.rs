@@ -1,527 +1,519 @@
 mod api;
+mod autostart;
 mod cache;
 mod config;
 mod grouper;
 mod locale;
-mod tray;
 mod updater;
-mod websocket;
+mod wsclient;
 
-use cache::{Cache, NotificationEntry};
+use cache::Cache;
 use chrono::Utc;
-use config::AppConfig;
-use grouper::Grouper;
+use config::Config;
+use grouper::{Grouper, PushEvent};
 use log::info;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Listener, Manager};
-use tokio::sync::Mutex;
-use tray::TrayManager;
-use websocket::{PushEvent, WsClient};
+use tauri::{
+    menu::{MenuBuilder, MenuItemBuilder},
+    tray::TrayIconBuilder,
+    AppHandle, Emitter, Manager, WindowEvent,
+};
+use tokio::sync::{mpsc, Mutex};
+use wsclient::{WsClient, WsClientEvent};
 
-/// App state shared across commands and event handlers.
-struct AppState {
-    config: Mutex<AppConfig>,
-    cache: Arc<Cache>,
-    tray_mgr: Arc<TrayManager>,
-    ws_client: Mutex<Option<Arc<WsClient>>>,
-    grouper: Mutex<Option<Arc<Grouper>>>,
+/// Shared application state.
+pub struct AppState {
+    pub config: Arc<Mutex<Config>>,
+    pub cache: Arc<Option<Cache>>,
+    pub ws_connected: Arc<Mutex<bool>>,
+    pub muted: Arc<Mutex<bool>>,
 }
 
 // ─── Tauri Commands ───────────────────────────────────────────────────────────
 
+/// Initiate desktop link auth flow — returns a code and opens browser.
 #[tauri::command]
-async fn get_config(state: tauri::State<'_, Arc<AppState>>) -> Result<AppConfig, String> {
-    Ok(state.config.lock().await.clone())
-}
-
-#[tauri::command]
-async fn save_config(
-    state: tauri::State<'_, Arc<AppState>>,
-    config: AppConfig,
-) -> Result<(), String> {
-    config.save()?;
-    *state.config.lock().await = config;
-    Ok(())
-}
-
-#[tauri::command]
-async fn is_configured(state: tauri::State<'_, Arc<AppState>>) -> Result<bool, String> {
-    Ok(state.config.lock().await.is_configured())
-}
-
-#[tauri::command]
-async fn register_device(
-    state: tauri::State<'_, Arc<AppState>>,
+async fn start_desktop_link(
     server_url: String,
-    token: String,
     device_name: String,
-) -> Result<(), String> {
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
     let name = if device_name.is_empty() {
-        let hostname = hostname::get()
-            .map(|h| h.to_string_lossy().to_string())
-            .unwrap_or_else(|_| "Desktop".to_string());
-        format!("Desktop {}", hostname)
+        format!("Desktop {}", hostname::get().unwrap_or_default().to_string_lossy())
     } else {
         device_name
     };
 
-    let device = api::register_device(&server_url, &name, &token).await?;
+    let code = api::desktop_link(&server_url, &name).await?;
+
+    // Save server_url to config (even before confirmation)
+    let mut cfg = state.config.lock().await;
+    cfg.server_url = server_url;
+    let _ = cfg.save();
+
+    Ok(code)
+}
+
+/// Poll for desktop link confirmation.
+#[tauri::command]
+async fn poll_desktop_link(
+    app_handle: AppHandle,
+    code: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<bool, String> {
+    let cfg = state.config.lock().await;
+    let server_url = cfg.server_url.clone();
+    drop(cfg);
+
+    match api::desktop_poll(&server_url, &code).await? {
+        Some(device) => {
+            // Confirmed! Save device info
+            let mut cfg = state.config.lock().await;
+            cfg.api_key = device.device_key.clone();
+            cfg.device_id = device.id.clone();
+            cfg.device_name = device.name.clone();
+            cfg.save()?;
+
+            // Start WS connection
+            let cfg_clone = cfg.clone();
+            drop(cfg);
+            start_ws_client(app_handle, cfg_clone);
+
+            Ok(true)
+        }
+        None => Ok(false), // Still pending
+    }
+}
+
+/// Register device with the server (legacy token-based, called from frontend setup page).
+#[tauri::command]
+async fn register_device(
+    app_handle: AppHandle,
+    server_url: String,
+    token: String,
+    device_name: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    let name = if device_name.is_empty() {
+        format!("Desktop {}", hostname::get().unwrap_or_default().to_string_lossy())
+    } else {
+        device_name
+    };
+
+    let device = api::register(&server_url, &name, &token).await?;
 
     let mut cfg = state.config.lock().await;
     cfg.server_url = server_url;
-    cfg.api_key = device.device_key;
-    cfg.device_id = device.id;
-    cfg.device_name = device.name;
+    cfg.api_key = device.device_key.clone();
+    cfg.device_id = device.id.clone();
+    cfg.device_name = device.name.clone();
     cfg.save()?;
 
-    Ok(())
-}
-
-#[tauri::command]
-async fn get_messages(
-    state: tauri::State<'_, Arc<AppState>>,
-    limit: Option<u32>,
-) -> Result<Vec<NotificationEntry>, String> {
-    state.cache.recent(limit.unwrap_or(50))
-}
-
-#[tauri::command]
-async fn get_unread_count(state: tauri::State<'_, Arc<AppState>>) -> Result<i32, String> {
-    state.cache.unread_count()
-}
-
-#[tauri::command]
-async fn mark_all_read(state: tauri::State<'_, Arc<AppState>>) -> Result<(), String> {
-    state.cache.mark_all_read()?;
-    state.tray_mgr.update_unread(0);
-    Ok(())
-}
-
-#[tauri::command]
-async fn mark_read(state: tauri::State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
-    state.cache.mark_read(&id)?;
-    let count = state.cache.unread_count().unwrap_or(0);
-    state.tray_mgr.update_unread(count);
-    Ok(())
-}
-
-#[tauri::command]
-async fn ack_message(state: tauri::State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
-    let cfg = state.config.lock().await;
-    let server_url = cfg.server_url.clone();
+    // Auto-start WS connection after registration
+    let cfg_clone = cfg.clone();
     drop(cfg);
+    start_ws_client(app_handle, cfg_clone);
 
-    api::ack_message(&server_url, &id).await?;
-    state.cache.mark_read(&id)?;
-    let count = state.cache.unread_count().unwrap_or(0);
-    state.tray_mgr.update_unread(count);
-    Ok(())
+    Ok(device.name)
 }
 
+/// Get current config state (for frontend to check if setup is needed).
 #[tauri::command]
-async fn snooze_message(
-    state: tauri::State<'_, Arc<AppState>>,
-    id: String,
-    duration: String,
-) -> Result<(), String> {
+async fn get_config(state: tauri::State<'_, AppState>) -> Result<Config, String> {
     let cfg = state.config.lock().await;
-    let server_url = cfg.server_url.clone();
-    drop(cfg);
-
-    api::snooze_message(&server_url, &id, &duration).await
+    Ok(cfg.clone())
 }
 
+/// Get recent notifications from cache.
 #[tauri::command]
-async fn reconnect_ws(
-    state: tauri::State<'_, Arc<AppState>>,
-) -> Result<(), String> {
-    if let Some(ws) = state.ws_client.lock().await.as_ref() {
-        ws.reconnect();
+async fn get_recent_notifications(
+    count: Option<i32>,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<cache::Entry>, String> {
+    match state.cache.as_ref() {
+        Some(c) => c.recent(count.unwrap_or(20)),
+        None => Ok(vec![]),
+    }
+}
+
+/// Get unread count.
+#[tauri::command]
+async fn get_unread_count(state: tauri::State<'_, AppState>) -> Result<i32, String> {
+    match state.cache.as_ref() {
+        Some(c) => c.unread_count(),
+        None => Ok(0),
+    }
+}
+
+/// Mark all notifications as read.
+#[tauri::command]
+async fn mark_all_read(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    if let Some(c) = state.cache.as_ref() {
+        c.mark_all_read()?;
     }
     Ok(())
 }
 
+/// Check if WebSocket is connected.
 #[tauri::command]
-async fn get_connection_state(
-    state: tauri::State<'_, Arc<AppState>>,
-) -> Result<bool, String> {
-    if let Some(ws) = state.ws_client.lock().await.as_ref() {
-        Ok(ws.is_connected().await)
-    } else {
-        Ok(false)
-    }
+async fn is_connected(state: tauri::State<'_, AppState>) -> Result<bool, String> {
+    Ok(*state.ws_connected.lock().await)
 }
 
+/// Toggle mute state.
 #[tauri::command]
-async fn set_muted(
-    state: tauri::State<'_, Arc<AppState>>,
-    muted: bool,
+async fn toggle_mute(state: tauri::State<'_, AppState>) -> Result<bool, String> {
+    let mut muted = state.muted.lock().await;
+    *muted = !*muted;
+    Ok(*muted)
+}
+
+/// Acknowledge a message (mark as read locally).
+#[tauri::command]
+async fn ack_message(message_id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    if let Some(ref c) = *state.cache {
+        c.mark_read(&message_id)?;
+    }
+    Ok(())
+}
+
+/// Update server URL in config.
+#[tauri::command]
+async fn update_server_url(
+    app_handle: AppHandle,
+    server_url: String,
+    state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    state.tray_mgr.set_muted(muted);
     let mut cfg = state.config.lock().await;
-    cfg.muted = Some(muted);
+    cfg.server_url = server_url;
     cfg.save()?;
+    // Restart WS with new URL
+    let cfg_clone = cfg.clone();
+    drop(cfg);
+    start_ws_client(app_handle, cfg_clone);
     Ok(())
 }
 
+/// Get autostart status.
 #[tauri::command]
-async fn is_muted(state: tauri::State<'_, Arc<AppState>>) -> Result<bool, String> {
-    Ok(state.tray_mgr.is_muted())
+fn get_autostart_enabled() -> bool {
+    autostart::is_enabled()
 }
 
-// ─── App Entry Point ──────────────────────────────────────────────────────────
+/// Toggle autostart.
+#[tauri::command]
+fn set_autostart(enabled: bool) -> Result<(), String> {
+    if enabled {
+        autostart::enable()
+    } else {
+        autostart::disable()
+    }
+}
+
+// ─── App Setup ────────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    info!(
-        "[desktop] overseer-desktop starting... (lang={})",
-        locale::current_lang()
-    );
+    let cfg = Config::load();
+    let notification_cache = Cache::new().ok();
 
-    let cfg = AppConfig::load();
-    let cache = Arc::new(Cache::new().expect("failed to initialize cache"));
-    let tray_mgr = Arc::new(TrayManager::new());
-
-    // Restore muted state
-    if let Some(muted) = cfg.muted {
-        tray_mgr.set_muted(muted);
-    }
-
-    // Check initial unread count
-    // On fresh start, clear stale unread from previous sessions
-    if let Ok(count) = cache.unread_count() {
-        if count > 0 {
-            // Clear old unread messages from previous Go client sessions
-            let _ = cache.mark_all_read();
-            tray_mgr.update_unread(0);
-        }
-    }
-
-    let app_state = Arc::new(AppState {
-        config: Mutex::new(cfg.clone()),
-        cache: cache.clone(),
-        tray_mgr: tray_mgr.clone(),
-        ws_client: Mutex::new(None),
-        grouper: Mutex::new(None),
-    });
+    let state = AppState {
+        config: Arc::new(Mutex::new(cfg.clone())),
+        cache: Arc::new(notification_cache),
+        ws_connected: Arc::new(Mutex::new(false)),
+        muted: Arc::new(Mutex::new(false)),
+    };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec![]),
-        ))
-        .plugin(tauri_plugin_store::Builder::default().build())
-        .manage(app_state.clone())
+        .manage(state)
         .invoke_handler(tauri::generate_handler![
-            get_config,
-            save_config,
-            is_configured,
+            start_desktop_link,
+            poll_desktop_link,
             register_device,
-            get_messages,
+            get_config,
+            get_recent_notifications,
             get_unread_count,
             mark_all_read,
-            mark_read,
+            is_connected,
+            toggle_mute,
             ack_message,
-            snooze_message,
-            reconnect_ws,
-            get_connection_state,
-            set_muted,
-            is_muted,
+            update_server_url,
+            get_autostart_enabled,
+            set_autostart,
         ])
-        .setup(move |app| {
-            // Prevent app from exiting when all windows are closed (tray app)
-            // This is handled by not having any default windows and using on_window_event
-
-            let app_handle = app.handle().clone();
-            let state = app_state.clone();
-            let tray_mgr_clone = tray_mgr.clone();
-
-            // Setup system tray
-            TrayManager::setup_tray(&app_handle, tray_mgr_clone.clone())
-                .expect("failed to setup tray");
-
-            // If not configured, show setup window
-            if !cfg.is_configured() {
-                let _setup_window = tauri::WebviewWindowBuilder::new(
-                    app,
-                    "setup",
-                    tauri::WebviewUrl::App("index.html#/setup".into()),
-                )
-                .title("Overseer Desktop - 首次配置")
-                .inner_size(450.0, 380.0)
-                .resizable(false)
-                .center()
-                .build()
-                .expect("failed to create setup window");
-            } else {
-                // Start WebSocket connection
-                let app_handle2 = app_handle.clone();
-                let state2 = state.clone();
-                let cache2 = cache.clone();
-                let tray_mgr2 = tray_mgr.clone();
-
-                tauri::async_runtime::spawn(async move {
-                    start_ws_connection(app_handle2, state2, cache2, tray_mgr2).await;
-                });
-
-                // Auto-update check
-                let app_handle3 = app_handle.clone();
-                let state3 = state.clone();
-                tauri::async_runtime::spawn(async move {
-                    check_for_updates(app_handle3, state3).await;
-                });
-            }
-
-            // Listen for events from frontend
-            let state_for_events = state.clone();
-            let app_for_events = app_handle.clone();
-            let cache_for_events = cache.clone();
-            let tray_for_events = tray_mgr.clone();
-
-            app_handle.listen("setup-complete", move |_event| {
-                let state = state_for_events.clone();
-                let app = app_for_events.clone();
-                let cache = cache_for_events.clone();
-                let tray = tray_for_events.clone();
-
-                tauri::async_runtime::spawn(async move {
-                    start_ws_connection(app.clone(), state.clone(), cache, tray).await;
-                    check_for_updates(app, state).await;
-                });
-            });
-
-            // Listen for open-webui event
-            let state_webui = state.clone();
-            app_handle.listen("open-webui", move |_| {
-                let state = state_webui.clone();
-                tauri::async_runtime::spawn(async move {
-                    let cfg = state.config.lock().await;
-                    let _ = open::that(&cfg.server_url);
-                });
-            });
-
-            // Listen for reconnect event
-            let state_reconnect = state.clone();
-            app_handle.listen("reconnect", move |_| {
-                let state = state_reconnect.clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Some(ws) = state.ws_client.lock().await.as_ref() {
-                        ws.reconnect();
-                    }
-                });
-            });
-
-            // Listen for open-settings event
-            let app_settings = app_handle.clone();
-            app_handle.listen("open-settings", move |_| {
-                let _ = tauri::WebviewWindowBuilder::new(
-                    &app_settings,
-                    "settings",
-                    tauri::WebviewUrl::App("index.html#/settings".into()),
-                )
-                .title("Overseer Desktop - 设置")
-                .inner_size(450.0, 350.0)
-                .resizable(false)
-                .center()
-                .build();
-            });
-
-            // Listen for open-messages event
-            let app_messages = app_handle.clone();
-            app_handle.listen("open-messages", move |_| {
-                // Try to focus existing window or create new one
-                if let Some(win) = app_messages.get_webview_window("messages") {
-                    let _ = win.show();
-                    let _ = win.set_focus();
-                } else {
-                    let _ = tauri::WebviewWindowBuilder::new(
-                        &app_messages,
-                        "messages",
-                        tauri::WebviewUrl::App("index.html#/messages".into()),
-                    )
-                    .title("Overseer - 消息列表")
-                    .inner_size(500.0, 600.0)
-                    .center()
-                    .build();
-                }
-            });
-
-            // Listen for tray-click to open messages window
-            let app_tray_click = app_handle.clone();
-            app_handle.listen("tray-click", move |_| {
-                if let Some(win) = app_tray_click.get_webview_window("messages") {
-                    let _ = win.show();
-                    let _ = win.set_focus();
-                    // Emit refresh event so the page reloads data
-                    let _ = win.emit("refresh-messages", ());
-                } else {
-                    let _ = tauri::WebviewWindowBuilder::new(
-                        &app_tray_click,
-                        "messages",
-                        tauri::WebviewUrl::App("index.html#/messages".into()),
-                    )
-                    .title("Overseer - 消息列表")
-                    .inner_size(500.0, 600.0)
-                    .center()
-                    .build();
-                }
-            });
-
-            Ok(())
-        })
         .on_window_event(|window, event| {
-            // Hide window instead of closing to keep the tray app running
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                let _ = window.hide();
+            // Hide window instead of closing — keep running in tray
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                window.hide().unwrap_or_default();
                 api.prevent_close();
             }
+        })
+        .setup(|app| {
+            let handle = app.handle().clone();
+
+            // Build tray menu
+            let quit = MenuItemBuilder::with_id("quit", locale::t("tray.quit")).build(app)?;
+            let open_ui = MenuItemBuilder::with_id("open_ui", locale::t("tray.open_webui")).build(app)?;
+            let reconnect = MenuItemBuilder::with_id("reconnect", locale::t("tray.reconnect")).build(app)?;
+            let mute = MenuItemBuilder::with_id("mute", locale::t("tray.mute")).build(app)?;
+            let show_window = MenuItemBuilder::with_id("show_window", "显示窗口").build(app)?;
+
+            let menu = MenuBuilder::new(app)
+                .item(&show_window)
+                .item(&open_ui)
+                .separator()
+                .item(&mute)
+                .item(&reconnect)
+                .separator()
+                .item(&quit)
+                .build()?;
+
+            let _tray = TrayIconBuilder::with_id("main")
+                .tooltip("Overseer Desktop")
+                .icon(tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png")).expect("load tray icon"))
+                .icon_as_template(false)
+                .menu(&menu)
+                .on_menu_event(move |app, event| {
+                    match event.id().as_ref() {
+                        "quit" => {
+                            app.exit(0);
+                        }
+                        "show_window" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        "open_ui" => {
+                            let state = app.state::<AppState>();
+                            let cfg = state.config.blocking_lock();
+                            if !cfg.server_url.is_empty() {
+                                let _ = open::that(&cfg.server_url);
+                            }
+                        }
+                        "reconnect" => {
+                            let _ = app.emit("ws-reconnect", ());
+                        }
+                        "mute" => {
+                            let state = app.state::<AppState>();
+                            let mut muted = state.muted.blocking_lock();
+                            *muted = !*muted;
+                            info!("[tray] mute toggled: {}", *muted);
+                        }
+                        _ => {}
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    match event {
+                        tauri::tray::TrayIconEvent::Click { button, .. } => {
+                            if button == tauri::tray::MouseButton::Left {
+                                let app = tray.app_handle();
+                                if let Some(window) = app.get_webview_window("main") {
+                                    let _ = window.show();
+                                    let _ = window.set_focus();
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                })
+                .menu_on_left_click(false)
+                .build(app)?;
+
+            // Start WebSocket connection if already configured
+            if cfg.is_configured() {
+                start_ws_client(handle, cfg);
+            }
+
+            Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
 
-async fn start_ws_connection(
-    app: AppHandle,
-    state: Arc<AppState>,
-    cache: Arc<Cache>,
-    tray_mgr: Arc<TrayManager>,
-) {
-    let cfg = state.config.lock().await.clone();
-    if !cfg.is_configured() {
-        return;
-    }
+/// Start the WebSocket client in a background task.
+fn start_ws_client(handle: AppHandle, cfg: Config) {
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<WsClientEvent>();
 
-    // Create grouper
-    let grouper = Arc::new(Grouper::new(app.clone()));
-    *state.grouper.lock().await = Some(grouper.clone());
-
-    // Create WebSocket client
-    let ws = Arc::new(WsClient::new(
-        app.clone(),
+    let ws_client = Arc::new(WsClient::new(
         cfg.server_url.clone(),
         cfg.api_key.clone(),
+        event_tx,
     ));
-    *state.ws_client.lock().await = Some(ws.clone());
 
-    // Listen for push events
-    let cache_push = cache.clone();
-    let tray_push = tray_mgr.clone();
-    let grouper_push = grouper.clone();
-    let app_push = app.clone();
-    let muted_ref = tray_mgr.clone();
+    let state = handle.state::<AppState>();
+    let cache = state.cache.clone();
+    let muted = state.muted.clone();
+    let ws_connected = state.ws_connected.clone();
+    let config = state.config.clone();
 
-    app.listen("ws-push", move |event| {
-        let payload = event.payload();
-        if let Ok(push) = serde_json::from_str::<PushEvent>(payload) {
-            // Check TTL expiry
-            if !push.expires_at.is_empty() {
-                if Cache::is_expired(&Some(push.expires_at.clone())) {
-                    info!("[desktop] skipping expired message: {}", push.id);
-                    return;
-                }
-            }
-
-            // Store in cache
-            let entry = NotificationEntry {
-                id: push.id.clone(),
-                title: push.title.clone(),
-                body: push.body.clone(),
-                url: push.url.clone(),
-                channel: push.channel.clone(),
-                source: push.source.clone(),
-                level: push.level.clone(),
-                received_at: Utc::now().to_rfc3339(),
-                unread: true,
-                acked_at: None,
-                expires_at: if push.expires_at.is_empty() {
-                    None
-                } else {
-                    Some(push.expires_at.clone())
-                },
-            };
-            info!("[desktop] caching message id={} title={}", entry.id, entry.title);
-            match cache_push.add(&entry) {
-                Ok(_) => info!("[desktop] cached successfully"),
-                Err(e) => info!("[desktop] cache add FAILED: {}", e),
-            }
-
-            // Update unread count
-            let count = cache_push.unread_count().unwrap_or(0);
-            info!("[desktop] unread count updated: {}", count);
-            tray_push.update_unread(count);
-
-            // Check muted
-            if muted_ref.is_muted() {
-                info!("[desktop] muted, skipping notification: {}", push.title);
+    // Create grouper with notification callback
+    let handle_clone = handle.clone();
+    let muted_clone = muted.clone();
+    let show_fn: grouper::ShowFn = Arc::new(move |title, body, _url, channel, _source, _level, _msg_id| {
+        if let Ok(is_muted) = muted_clone.try_lock() {
+            if *is_muted {
                 return;
             }
+        }
 
-            // Route through grouper
-            if let Some(event_to_show) = grouper_push.ingest(push) {
-                let _ = app_push.emit("show-notification", &event_to_show);
+        // Emit to frontend
+        let _ = handle_clone.emit("notification", serde_json::json!({
+            "title": title,
+            "body": body,
+            "channel": channel,
+        }));
 
-                // Show native notification
-                use tauri_plugin_notification::NotificationExt;
-                let mut notification = app_push.notification()
-                    .builder()
-                    .title(&event_to_show.title);
+        // Show system notification
+        let enriched_body = if !channel.is_empty() {
+            format!("[{}] {}", channel, body)
+        } else {
+            body
+        };
 
-                if !event_to_show.body.is_empty() {
-                    notification = notification.body(&event_to_show.body);
+        // Use tauri notification plugin
+        if let Some(webview) = handle_clone.webview_windows().values().next() {
+            let _ = tauri_plugin_notification::NotificationExt::notification(webview.app_handle())
+                .builder()
+                .title(&title)
+                .body(&enriched_body)
+                .show();
+        }
+    });
+
+    let grouper = Arc::new(Grouper::new(show_fn));
+
+    // Spawn WS client
+    let ws_client_clone = ws_client.clone();
+    tauri::async_runtime::spawn(async move {
+        ws_client_clone.run().await;
+    });
+
+    // Spawn event handler
+    let handle_events = handle.clone();
+    tauri::async_runtime::spawn(async move {
+        while let Some(event) = event_rx.recv().await {
+            match event {
+                WsClientEvent::Push(push) => {
+                    info!("[ws] notification: [{}] {} - {}", push.channel, push.title, push.body);
+
+                    // Cache the notification
+                    if let Some(ref c) = *cache {
+                        let expires_at = if push.expires_at.is_empty() {
+                            None
+                        } else {
+                            chrono::DateTime::parse_from_rfc3339(&push.expires_at)
+                                .ok()
+                                .map(|dt| dt.with_timezone(&Utc))
+                        };
+
+                        let _ = c.add(&cache::Entry {
+                            id: push.id.clone(),
+                            title: push.title.clone(),
+                            body: push.body.clone(),
+                            url: push.url.clone(),
+                            channel: push.channel.clone(),
+                            source: push.source.clone(),
+                            received_at: Utc::now(),
+                            unread: true,
+                            acked_at: None,
+                            expires_at,
+                        });
+                    }
+
+                    // Emit unread count update + update tray
+                    if let Some(ref c) = *cache {
+                        if let Ok(count) = c.unread_count() {
+                            let _ = handle_events.emit("unread-count", count);
+                            update_tray_tooltip(&handle_events, count);
+                        }
+                    }
+
+                    // Route through grouper
+                    grouper.ingest(PushEvent {
+                        id: push.id,
+                        source: push.source,
+                        channel: push.channel,
+                        title: push.title,
+                        body: push.body,
+                        url: push.url,
+                        level: push.level,
+                    });
                 }
-
-                let _ = notification.show();
-                info!("[desktop] notification shown: {}", event_to_show.title);
+                WsClientEvent::AckSync { message_id } => {
+                    if let Some(ref c) = *cache {
+                        let _ = c.mark_ack_synced(&message_id);
+                        if let Ok(count) = c.unread_count() {
+                            let _ = handle_events.emit("unread-count", count);
+                            update_tray_tooltip(&handle_events, count);
+                        }
+                    }
+                }
+                WsClientEvent::Connected => {
+                    *ws_connected.lock().await = true;
+                    let _ = handle_events.emit("ws-status", "connected");
+                }
+                WsClientEvent::Disconnected => {
+                    *ws_connected.lock().await = false;
+                    let _ = handle_events.emit("ws-status", "disconnected");
+                }
+                WsClientEvent::AuthFailed => {
+                    *ws_connected.lock().await = false;
+                    let mut cfg = config.lock().await;
+                    cfg.api_key.clear();
+                    let _ = cfg.save();
+                    let _ = handle_events.emit("ws-status", "auth_failed");
+                }
             }
         }
     });
 
-    // Listen for ack_sync events
-    let cache_ack = cache.clone();
-    let tray_ack = tray_mgr.clone();
-    app.listen("ws-ack-sync", move |event| {
-        let payload = event.payload();
-        if let Ok(ack) = serde_json::from_str::<websocket::AckSyncEvent>(payload) {
-            let _ = cache_ack.mark_ack_synced(&ack.message_id);
-            let count = cache_ack.unread_count().unwrap_or(0);
-            tray_ack.update_unread(count);
+    // Check for updates in background
+    let handle_updater = handle.clone();
+    let config_updater = state.config.clone();
+    tauri::async_runtime::spawn(async move {
+        let cfg = config_updater.lock().await;
+        let last_check = cfg.last_update_check;
+        drop(cfg);
+
+        if let Some(result) = updater::check("dev", last_check).await {
+            if result.available {
+                let _ = handle_updater.emit("update-available", serde_json::json!({
+                    "version": result.version,
+                    "url": result.download_url,
+                }));
+            }
         }
-    });
 
-    // Listen for auth failure
-    app.listen("ws-auth-fail", move |_| {
-        info!("[desktop] auth failed, need re-registration");
-        // Could emit event to show setup window
-    });
-
-    // Update connection state in tray
-    let tray_state = tray_mgr.clone();
-    app.listen("ws-state", move |event| {
-        let payload = event.payload();
-        let connected = payload.contains("connected") && !payload.contains("disconnected");
-        tray_state.set_connected(connected);
+        // Update last check time
+        let mut cfg = config_updater.lock().await;
+        cfg.last_update_check = Some(Utc::now());
+        let _ = cfg.save();
     });
 }
 
-async fn check_for_updates(app: AppHandle, state: Arc<AppState>) {
-    let cfg = state.config.lock().await.clone();
-    let current_version = env!("CARGO_PKG_VERSION");
-
-    if let Some(result) =
-        updater::check_update(current_version, cfg.last_update_check.as_deref()).await
-    {
-        let _ = app.emit("update-available", &serde_json::json!({
-            "version": result.version,
-            "download_url": result.download_url,
-        }));
+/// Update tray icon tooltip to show unread count.
+fn update_tray_tooltip(handle: &AppHandle, unread_count: i32) {
+    if let Some(tray) = handle.tray_by_id("main") {
+        let tooltip = if unread_count > 0 {
+            format!("Overseer Desktop ({} 未读)", unread_count)
+        } else {
+            "Overseer Desktop".to_string()
+        };
+        let _ = tray.set_tooltip(Some(&tooltip));
+        // On macOS, set title to show badge number next to tray icon
+        #[cfg(target_os = "macos")]
+        {
+            let title = if unread_count > 0 {
+                Some(format!("{}", unread_count))
+            } else {
+                None
+            };
+            let _ = tray.set_title(title.as_deref());
+        }
     }
-
-    // Update last check time
-    let mut cfg = state.config.lock().await;
-    cfg.last_update_check = Some(Utc::now().to_rfc3339());
-    let _ = cfg.save();
 }

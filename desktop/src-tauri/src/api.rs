@@ -1,143 +1,189 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
-#[derive(Debug, Serialize)]
+/// Device registration response from the server.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Device {
+    pub id: String,
+    pub name: String,
+    pub device_key: String,
+    #[serde(default)]
+    pub r#type: String,
+    #[serde(default)]
+    pub is_default: bool,
+}
+
+/// Standard API response envelope.
+#[derive(Debug, Deserialize)]
+struct ApiResponse {
+    code: i32,
+    message: String,
+    data: Option<serde_json::Value>,
+}
+
+/// Registration request body.
+#[derive(Serialize)]
 struct RegisterRequest {
     name: String,
     token: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct ApiResponse<T> {
-    pub code: u32,
-    pub message: String,
-    pub data: Option<T>,
+/// HTTP client with 10s timeout.
+fn http_client() -> Client {
+    Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap_or_default()
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct DeviceInfo {
-    pub id: String,
-    pub name: String,
-    pub device_key: String,
-    #[serde(rename = "type")]
-    pub device_type: String,
-}
+/// Initiate desktop link flow. Returns a link code.
+/// POST /api/devices/desktop-link
+pub async fn desktop_link(base_url: &str, name: &str) -> Result<String, String> {
+    let url = format!("{}/api/devices/desktop-link", base_url);
+    let body = serde_json::json!({"name": name});
 
-/// Register a desktop device with the Overseer backend.
-pub async fn register_device(
-    server_url: &str,
-    name: &str,
-    token: &str,
-) -> Result<DeviceInfo, String> {
-    let client = Client::new();
-    let url = format!("{}/api/devices/desktop-register", server_url.trim_end_matches('/'));
-
-    let resp = client
+    let resp = http_client()
         .post(&url)
-        .json(&RegisterRequest {
-            name: name.to_string(),
-            token: token.to_string(),
-        })
-        .timeout(std::time::Duration::from_secs(10))
+        .json(&body)
         .send()
         .await
-        .map_err(|e| format!("network error: {}", e))?;
+        .map_err(|e| format!("request failed: {}", e))?;
 
-    let status = resp.status();
-    let body = resp
+    let resp_body = resp.text().await.map_err(|e| format!("read response: {}", e))?;
+    let api_resp: ApiResponse =
+        serde_json::from_str(&resp_body).map_err(|e| format!("parse: {}", e))?;
+
+    if api_resp.code != 200 {
+        return Err(format!("{} (code {})", api_resp.message, api_resp.code));
+    }
+
+    let data = api_resp.data.ok_or("no data")?;
+    data.get("link_code")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| "no link_code in response".to_string())
+}
+
+/// Poll for desktop link confirmation.
+/// GET /api/devices/desktop-poll?code=xxx
+/// Returns Ok(Some(device)) when confirmed, Ok(None) when still pending.
+pub async fn desktop_poll(base_url: &str, code: &str) -> Result<Option<Device>, String> {
+    let url = format!("{}/api/devices/desktop-poll?code={}", base_url, code);
+
+    let resp = http_client()
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {}", e))?;
+
+    let status = resp.status().as_u16();
+    let resp_body = resp.text().await.map_err(|e| format!("read response: {}", e))?;
+
+    if status == 202 {
+        // Still pending
+        return Ok(None);
+    }
+
+    if status == 404 || status == 410 {
+        return Err("link code expired or not found".to_string());
+    }
+
+    let api_resp: ApiResponse =
+        serde_json::from_str(&resp_body).map_err(|e| format!("parse: {}", e))?;
+
+    if api_resp.code != 200 {
+        return Err(format!("{}", api_resp.message));
+    }
+
+    let data = api_resp.data.ok_or("no data")?;
+    let device: Device = serde_json::from_value(data).map_err(|e| format!("parse device: {}", e))?;
+    Ok(Some(device))
+}
+
+/// Register this desktop client with the server (legacy token-based).
+/// POST /api/devices/desktop-register
+pub async fn register(base_url: &str, name: &str, token: &str) -> Result<Device, String> {
+    let url = format!("{}/api/devices/desktop-register", base_url);
+    let body = RegisterRequest {
+        name: name.to_string(),
+        token: token.to_string(),
+    };
+
+    let resp = http_client()
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {}", e))?;
+
+    let resp_body = resp
         .text()
         .await
         .map_err(|e| format!("read response: {}", e))?;
 
-    if !status.is_success() {
-        return Err(format!("registration failed ({}): {}", status, body));
-    }
-
-    let api_resp: ApiResponse<DeviceInfo> =
-        serde_json::from_str(&body).map_err(|e| format!("parse response: {}", e))?;
+    let api_resp: ApiResponse =
+        serde_json::from_str(&resp_body).map_err(|e| format!("parse response: {} (body: {})", e, resp_body))?;
 
     if api_resp.code != 200 {
-        return Err(format!("registration error: {}", api_resp.message));
+        return Err(format!(
+            "registration failed: {} (code {})",
+            api_resp.message, api_resp.code
+        ));
     }
 
-    api_resp.data.ok_or_else(|| "no device data in response".to_string())
+    let data = api_resp.data.ok_or("no data in response")?;
+    let device: Device =
+        serde_json::from_value(data).map_err(|e| format!("parse device data: {}", e))?;
+
+    Ok(device)
+}
+
+/// POST with exponential backoff retry (max 3 attempts, 1s→2s→4s).
+pub async fn post_with_retry(url: &str, body: Option<&[u8]>, api_key: &str) -> Result<(), String> {
+    let client = http_client();
+    let mut backoff = Duration::from_secs(1);
+
+    for attempt in 0..3 {
+        let mut req = client.post(url)
+            .header("X-Device-Key", api_key);
+        if let Some(b) = body {
+            req = req.header("content-type", "application/json").body(b.to_vec());
+        }
+
+        match req.send().await {
+            Ok(resp) => {
+                let status = resp.status().as_u16();
+                if (200..300).contains(&status) {
+                    return Ok(());
+                }
+                if attempt == 2 {
+                    return Err(format!("HTTP {}", status));
+                }
+            }
+            Err(e) => {
+                if attempt == 2 {
+                    return Err(format!("request failed after 3 attempts: {}", e));
+                }
+            }
+        }
+
+        tokio::time::sleep(backoff).await;
+        backoff *= 2;
+    }
+
+    Err("request failed after 3 attempts".to_string())
 }
 
 /// Acknowledge a message.
-pub async fn ack_message(server_url: &str, message_id: &str) -> Result<(), String> {
-    let client = Client::new();
-    let url = format!(
-        "{}/api/messages/{}/ack",
-        server_url.trim_end_matches('/'),
-        message_id
-    );
-
-    let mut last_err = String::new();
-    for attempt in 0..3 {
-        if attempt > 0 {
-            tokio::time::sleep(std::time::Duration::from_millis(
-                1000 * 2u64.pow(attempt as u32),
-            ))
-            .await;
-        }
-
-        match client
-            .post(&url)
-            .timeout(std::time::Duration::from_secs(10))
-            .send()
-            .await
-        {
-            Ok(resp) if resp.status().is_success() => return Ok(()),
-            Ok(resp) => {
-                last_err = format!("ack failed ({})", resp.status());
-            }
-            Err(e) => {
-                last_err = format!("ack network error: {}", e);
-            }
-        }
-    }
-
-    Err(last_err)
+pub async fn ack_message(base_url: &str, api_key: &str, message_id: &str) -> Result<(), String> {
+    let url = format!("{}/api/messages/{}/ack", base_url, message_id);
+    post_with_retry(&url, None, api_key).await
 }
 
 /// Snooze a message.
-pub async fn snooze_message(
-    server_url: &str,
-    message_id: &str,
-    duration: &str,
-) -> Result<(), String> {
-    let client = Client::new();
-    let url = format!(
-        "{}/api/messages/{}/snooze",
-        server_url.trim_end_matches('/'),
-        message_id
-    );
-
-    let mut last_err = String::new();
-    for attempt in 0..3 {
-        if attempt > 0 {
-            tokio::time::sleep(std::time::Duration::from_millis(
-                1000 * 2u64.pow(attempt as u32),
-            ))
-            .await;
-        }
-
-        match client
-            .post(&url)
-            .json(&serde_json::json!({ "duration": duration }))
-            .timeout(std::time::Duration::from_secs(10))
-            .send()
-            .await
-        {
-            Ok(resp) if resp.status().is_success() => return Ok(()),
-            Ok(resp) => {
-                last_err = format!("snooze failed ({})", resp.status());
-            }
-            Err(e) => {
-                last_err = format!("snooze network error: {}", e);
-            }
-        }
-    }
-
-    Err(last_err)
+pub async fn snooze_message(base_url: &str, api_key: &str, message_id: &str, duration: &str) -> Result<(), String> {
+    let url = format!("{}/api/messages/{}/snooze", base_url, message_id);
+    let body = serde_json::json!({"duration": duration}).to_string();
+    post_with_retry(&url, Some(body.as_bytes()), api_key).await
 }
