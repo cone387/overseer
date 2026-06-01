@@ -12,14 +12,19 @@ use chrono::Utc;
 use config::Config;
 use grouper::{Grouper, PushEvent};
 use log::info;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{
+    image::Image,
     menu::{MenuBuilder, MenuItemBuilder},
     tray::TrayIconBuilder,
     AppHandle, Emitter, Manager, WindowEvent,
 };
 use tokio::sync::{mpsc, Mutex};
 use wsclient::{WsClient, WsClientEvent};
+
+static IS_FLASHING: AtomicBool = AtomicBool::new(false);
+static FLASH_RUNNING: AtomicBool = AtomicBool::new(false);
 
 /// Shared application state.
 pub struct AppState {
@@ -147,10 +152,15 @@ async fn get_unread_count(state: tauri::State<'_, AppState>) -> Result<i32, Stri
 
 /// Mark all notifications as read.
 #[tauri::command]
-async fn mark_all_read(state: tauri::State<'_, AppState>) -> Result<(), String> {
+async fn mark_all_read(
+    app_handle: AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
     if let Some(c) = state.cache.as_ref() {
         c.mark_all_read()?;
     }
+    let _ = app_handle.emit("unread-count", 0);
+    update_tray(&app_handle, 0);
     Ok(())
 }
 
@@ -170,9 +180,17 @@ async fn toggle_mute(state: tauri::State<'_, AppState>) -> Result<bool, String> 
 
 /// Acknowledge a message (mark as read locally).
 #[tauri::command]
-async fn ack_message(message_id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+async fn ack_message(
+    app_handle: AppHandle,
+    message_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
     if let Some(ref c) = *state.cache {
         c.mark_read(&message_id)?;
+        if let Ok(count) = c.unread_count() {
+            let _ = app_handle.emit("unread-count", count);
+            update_tray(&app_handle, count);
+        }
     }
     Ok(())
 }
@@ -246,10 +264,21 @@ pub fn run() {
             set_autostart,
         ])
         .on_window_event(|window, event| {
-            // Hide window instead of closing — keep running in tray
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                window.hide().unwrap_or_default();
-                api.prevent_close();
+            match event {
+                WindowEvent::CloseRequested { api, .. } => {
+                    window.hide().unwrap_or_default();
+                    api.prevent_close();
+                }
+                WindowEvent::Focused(true) => {
+                    if let Some(ref c) = *window.state::<AppState>().cache {
+                        if let Ok(count) = c.unread_count() {
+                            if count == 0 {
+                                stop_tray_flash(window.app_handle());
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         })
         .setup(|app| {
@@ -429,7 +458,7 @@ fn start_ws_client(handle: AppHandle, cfg: Config) {
                     if let Some(ref c) = *cache {
                         if let Ok(count) = c.unread_count() {
                             let _ = handle_events.emit("unread-count", count);
-                            update_tray_tooltip(&handle_events, count);
+                            update_tray(&handle_events, count);
                         }
                     }
 
@@ -449,7 +478,7 @@ fn start_ws_client(handle: AppHandle, cfg: Config) {
                         let _ = c.mark_ack_synced(&message_id);
                         if let Ok(count) = c.unread_count() {
                             let _ = handle_events.emit("unread-count", count);
-                            update_tray_tooltip(&handle_events, count);
+                            update_tray(&handle_events, count);
                         }
                     }
                 }
@@ -496,8 +525,8 @@ fn start_ws_client(handle: AppHandle, cfg: Config) {
     });
 }
 
-/// Update tray icon tooltip to show unread count.
-fn update_tray_tooltip(handle: &AppHandle, unread_count: i32) {
+/// Update tray: tooltip + flash control based on unread count.
+fn update_tray(handle: &AppHandle, unread_count: i32) {
     if let Some(tray) = handle.tray_by_id("main") {
         let tooltip = if unread_count > 0 {
             format!("Overseer Desktop ({} 未读)", unread_count)
@@ -505,7 +534,6 @@ fn update_tray_tooltip(handle: &AppHandle, unread_count: i32) {
             "Overseer Desktop".to_string()
         };
         let _ = tray.set_tooltip(Some(&tooltip));
-        // On macOS, set title to show badge number next to tray icon
         #[cfg(target_os = "macos")]
         {
             let title = if unread_count > 0 {
@@ -516,4 +544,67 @@ fn update_tray_tooltip(handle: &AppHandle, unread_count: i32) {
             let _ = tray.set_title(title.as_deref());
         }
     }
+
+    if unread_count > 0 {
+        start_tray_flash(handle);
+    } else {
+        stop_tray_flash(handle);
+    }
+}
+
+/// Start tray icon flashing if not already running.
+fn start_tray_flash(handle: &AppHandle) {
+    if FLASH_RUNNING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    IS_FLASHING.store(true, Ordering::SeqCst);
+
+    let handle = handle.clone();
+    tauri::async_runtime::spawn(async move {
+        let normal_bytes = include_bytes!("../icons/32x32.png").to_vec();
+        let transparent = make_transparent_icon();
+        let normal_icon = Image::from_bytes(&normal_bytes).expect("load normal icon");
+        let blank_icon = Image::from_bytes(&transparent).expect("load blank icon");
+
+        let mut visible = true;
+        while IS_FLASHING.load(Ordering::SeqCst) {
+            if let Some(tray) = handle.tray_by_id("main") {
+                let icon = if visible { &normal_icon } else { &blank_icon };
+                let _ = tray.set_icon(Some(icon.clone()));
+            }
+            visible = !visible;
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+
+        if let Some(tray) = handle.tray_by_id("main") {
+            let _ = tray.set_icon(Some(normal_icon));
+        }
+        FLASH_RUNNING.store(false, Ordering::SeqCst);
+    });
+}
+
+/// Stop tray icon flashing, restoring the normal icon.
+fn stop_tray_flash(_handle: &AppHandle) {
+    IS_FLASHING.store(false, Ordering::SeqCst);
+}
+
+/// Generate a 32x32 PNG that's almost fully transparent (alpha=1).
+fn make_transparent_icon() -> Vec<u8> {
+    const SIZE: u32 = 32;
+
+    let mut raw = Vec::with_capacity((SIZE * SIZE * 4) as usize);
+    for _ in 0..SIZE * SIZE {
+        // alpha=1 is nearly invisible but not zero (avoids rendering issues)
+        raw.extend_from_slice(&[255, 255, 255, 1]);
+    }
+
+    let mut buf = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut buf, SIZE, SIZE);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&raw).unwrap();
+    }
+    buf
 }
