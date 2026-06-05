@@ -15,6 +15,7 @@ pub struct Entry {
     pub url: String,
     pub channel: String,
     pub source: String,
+    pub level: String,
     pub received_at: DateTime<Utc>,
     pub unread: bool,
     pub acked_at: Option<DateTime<Utc>>,
@@ -45,6 +46,7 @@ impl Cache {
                 url TEXT,
                 channel TEXT,
                 source TEXT,
+                level TEXT DEFAULT '',
                 received_at TEXT DEFAULT (datetime('now')),
                 unread INTEGER DEFAULT 1,
                 acked_at TEXT,
@@ -62,7 +64,7 @@ impl Cache {
     pub fn add(&self, entry: &Entry) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
-            "INSERT OR REPLACE INTO notifications (id, title, body, url, channel, source, received_at, unread, acked_at, expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT OR REPLACE INTO notifications (id, title, body, url, channel, source, level, received_at, unread, acked_at, expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 entry.id,
                 entry.title,
@@ -70,6 +72,7 @@ impl Cache {
                 entry.url,
                 entry.channel,
                 entry.source,
+                entry.level,
                 entry.received_at.to_rfc3339(),
                 entry.unread as i32,
                 entry.acked_at.map(|t| t.to_rfc3339()),
@@ -132,7 +135,7 @@ impl Cache {
     pub fn recent(&self, n: i32) -> Result<Vec<Entry>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn
-            .prepare("SELECT id, title, body, url, channel, source, received_at, unread, acked_at, expires_at FROM notifications ORDER BY received_at DESC LIMIT ?1")
+            .prepare("SELECT id, title, body, url, channel, source, level, received_at, unread, acked_at, expires_at FROM notifications ORDER BY received_at DESC LIMIT ?1")
             .map_err(|e| format!("prepare: {}", e))?;
 
         let entries = stmt
@@ -147,10 +150,10 @@ impl Cache {
     }
 
     fn row_to_entry(row: &rusqlite::Row) -> Entry {
-        let received_at_str: String = row.get(6).unwrap_or_default();
-        let unread_int: i32 = row.get(7).unwrap_or(1);
-        let acked_at_str: Option<String> = row.get(8).unwrap_or(None);
-        let expires_at_str: Option<String> = row.get(9).unwrap_or(None);
+        let received_at_str: String = row.get(7).unwrap_or_default();
+        let unread_int: i32 = row.get(8).unwrap_or(1);
+        let acked_at_str: Option<String> = row.get(9).unwrap_or(None);
+        let expires_at_str: Option<String> = row.get(10).unwrap_or(None);
 
         Entry {
             id: row.get(0).unwrap_or_default(),
@@ -159,6 +162,7 @@ impl Cache {
             url: row.get(3).unwrap_or_default(),
             channel: row.get(4).unwrap_or_default(),
             source: row.get(5).unwrap_or_default(),
+            level: row.get(6).unwrap_or_default(),
             received_at: DateTime::parse_from_rfc3339(&received_at_str)
                 .map(|dt| dt.with_timezone(&Utc))
                 .unwrap_or_else(|_| Utc::now()),

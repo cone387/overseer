@@ -178,21 +178,78 @@ async fn toggle_mute(state: tauri::State<'_, AppState>) -> Result<bool, String> 
     Ok(*muted)
 }
 
-/// Acknowledge a message (mark as read locally).
+/// Get messages (alias for get_recent_notifications, matches frontend API).
+#[tauri::command]
+async fn get_messages(
+    limit: Option<i32>,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<cache::Entry>, String> {
+    match state.cache.as_ref() {
+        Some(c) => c.recent(limit.unwrap_or(50)),
+        None => Ok(vec![]),
+    }
+}
+
+/// Acknowledge a message (mark as read locally + notify server).
 #[tauri::command]
 async fn ack_message(
     app_handle: AppHandle,
-    message_id: String,
+    id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     if let Some(ref c) = *state.cache {
-        c.mark_read(&message_id)?;
+        c.mark_read(&id)?;
+        if let Ok(count) = c.unread_count() {
+            let _ = app_handle.emit("unread-count", count);
+            update_tray(&app_handle, count);
+        }
+    }
+
+    // Notify server about ack
+    let cfg = state.config.lock().await;
+    if !cfg.server_url.is_empty() && !cfg.api_key.is_empty() {
+        let server_url = cfg.server_url.clone();
+        let api_key = cfg.api_key.clone();
+        drop(cfg);
+        let _ = api::ack_message(&server_url, &api_key, &id).await;
+    }
+
+    Ok(())
+}
+
+/// Mark a single message as read (local only, no server ack).
+#[tauri::command]
+async fn mark_read(
+    app_handle: AppHandle,
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    if let Some(ref c) = *state.cache {
+        c.mark_read(&id)?;
         if let Ok(count) = c.unread_count() {
             let _ = app_handle.emit("unread-count", count);
             update_tray(&app_handle, count);
         }
     }
     Ok(())
+}
+
+/// Snooze a message for the given duration.
+#[tauri::command]
+async fn snooze_message(
+    id: String,
+    duration: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let cfg = state.config.lock().await;
+    if cfg.server_url.is_empty() || cfg.api_key.is_empty() {
+        return Err("not configured".to_string());
+    }
+    let server_url = cfg.server_url.clone();
+    let api_key = cfg.api_key.clone();
+    drop(cfg);
+
+    api::snooze_message(&server_url, &api_key, &id, &duration).await
 }
 
 /// Update server URL in config.
@@ -254,11 +311,14 @@ pub fn run() {
             register_device,
             get_config,
             get_recent_notifications,
+            get_messages,
             get_unread_count,
             mark_all_read,
+            mark_read,
             is_connected,
             toggle_mute,
             ack_message,
+            snooze_message,
             update_server_url,
             get_autostart_enabled,
             set_autostart,
@@ -350,7 +410,7 @@ pub fn run() {
                         _ => {}
                     }
                 })
-                .menu_on_left_click(false)
+                .show_menu_on_left_click(false)
                 .build(app)?;
 
             // Start WebSocket connection if already configured
@@ -447,6 +507,7 @@ fn start_ws_client(handle: AppHandle, cfg: Config) {
                             url: push.url.clone(),
                             channel: push.channel.clone(),
                             source: push.source.clone(),
+                            level: push.level.clone(),
                             received_at: Utc::now(),
                             unread: true,
                             acked_at: None,

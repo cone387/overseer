@@ -782,3 +782,64 @@
   gap: 8px;
   padding: 8px 0;
 }
+
+/* Desktop Link Page */
+.desktop-link-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+  background: #f9fafb;
+}
+
+.desktop-link-card {
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 48px 40px;
+  max-width: 420px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+}
+
+.desktop-link-icon {
+  font-size: 3rem;
+  margin-bottom: 16px;
+}
+
+.desktop-link-card h2 {
+  margin: 0 0 8px;
+  font-size: 1.5rem;
+  color: var(--color-text);
+}
+
+.desktop-link-card p {
+  margin: 0 0 24px;
+  color: var(--color-text-secondary);
+}
+
+.desktop-link-code {
+  font-family: monospace;
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  padding: 16px 24px;
+  background: var(--color-bg-secondary, #f3f4f6);
+  border-radius: 8px;
+  margin-bottom: 24px;
+  color: var(--color-primary);
+}
+
+.desktop-link-error {
+  color: var(--color-danger, #ef4444);
+  font-size: 0.875rem;
+  margin-bottom: 16px;
+}
+
+.desktop-link-btn {
+  width: 100%;
+  padding: 12px 24px;
+  font-size: 1rem;
+}

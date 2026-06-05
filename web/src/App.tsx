@@ -9,11 +9,13 @@ import Devices from './pages/Devices'
 import Channels from './pages/Channels'
 import ApiKeys from './pages/ApiKeys'
 import Settings from './pages/Settings'
+import DesktopLink from './pages/DesktopLink'
 
 function App() {
   return (
     <AuthGuard>
       <Routes>
+        <Route path="/desktop-link" element={<DesktopLink />} />
         <Route path="/" element={<Layout />}>
           <Route index element={<Dashboard />} />
           <Route path="messages" element={<Messages />} />

@@ -402,6 +402,9 @@ func main() {
 	deviceHandler := handler.NewDeviceHandler(db)
 	deviceHandler.RegisterRoutes(api)
 
+	// Desktop link confirmation (authenticated)
+	desktopHandler.RegisterProtectedRoutes(api)
+
 	// Lifecycle API (ack, snooze)
 	lifecycleHandler := handler.NewLifecycleHandler(db, wsHub, rp)
 	lifecycleHandler.RegisterRoutes(api)

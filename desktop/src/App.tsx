@@ -174,7 +174,7 @@ function App() {
 
   const handleAck = async (id: string) => {
     try {
-      await invoke("ack_message", { messageId: id });
+      await invoke("ack_message", { id });
       loadNotifications();
     } catch (e) {
       console.error("ack failed:", e);

@@ -447,3 +447,12 @@ export function deleteChannel(id: string): Promise<ApiResponse<null>> {
     method: 'DELETE',
   })
 }
+
+// ─── Desktop Link API ───────────────────────────────────────────────────────
+
+export function confirmDesktopLink(code: string): Promise<ApiResponse<unknown>> {
+  return request<unknown>('/api/devices/desktop-link/confirm', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  })
+}
